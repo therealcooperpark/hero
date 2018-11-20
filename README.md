@@ -37,15 +37,19 @@ optional arguments:
 
 ## OUTPUT
 - bad_genes.txt
+
 List of genes that failed HERO parsing.
 
 - highways.txt
+
 List of donor:recipient pairs and their respective recombination counts
 
 - highways_hero_itol.txt
+
 iToL formatted file of recombination highways to be dragged into population's phylogenetic tree on iToL
 
 - recombination_hero_itol.txt
+
 iToL formatted file of non-highway recombination events to be dragged into population's phylogenetic tree on iToL
 
 
