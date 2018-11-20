@@ -9,14 +9,31 @@ HERO is a pipeline designed to parse and visualize highways of genome-wide recom
 
 3) Generates a file formatted for the connections dataset in iToL to visualize recombination highways over a phylogenetic tree of the population.
 
+
+It also includes **sidekick.py** which can be used to run fastGEAR on each individual core-gene following Roary. It works by:
+
+1) Using Roary's *clustered_proteins* file to find core genes in the pan-genome and extracting individual gene alignments from *pan_genome_sequences* directory.
+
+2) Uses Roary's original input gff files to rename FASTA headers in each alignment file to the original gff name rather than gene ID
+
+3) *optionally* runs fastGEAR on each renamed gene_alignment. Immediately ready for HERO
+
+
 ## INSTALLATION
 HERO has the following dependencies:
 - NCBI-blast+
+
+Optional Dependencies:
+- fastGEAR
+- Roary
 
 ### Download command:
 `git clone https://github.com/therealcooperpark/hero.git`
 
 ## USAGE
+
+### hero.py
+
 ```
 usage: hero.py [options] fastgear
 
@@ -33,6 +50,23 @@ optional arguments:
   --cpus        Number of threads to use. [1]
   --nohighway   Hexadecimal code for non-highway color in output file
                 [#D3D3D3]
+```
+
+### sidekick.py
+```
+usage: sidekick.py [options] alignments gffs
+
+positional arguments:
+  alignments       Filepath to individual gene alignments
+  gffs             Filepath to GFF files
+
+optional arguments:
+  -h, --help       show this help message and exit
+  --cluster_file   Filepath to the 'clustered_proteins' output of Roary
+                   [./clustered_proteins]
+  --output         Filepath to output directory for core genome protein files.
+                   [Core_Genome_alignments]
+  --fastGEAR       Run fastGEAR on every core gene
 ```
 
 ## OUTPUT
