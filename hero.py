@@ -121,7 +121,7 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             if float(line[4]) < args.log:
                 continue
 
-            if line[2] > max_lineage:
+            if int(line[2]) > int(max_lineage):
                 query_lineages.setdefault(line[2], [])
 
             # Pull sequence fragment and set lineage to blast against
@@ -138,13 +138,14 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
 
             # Prep fasta format for sequence fragment, then blast against lineage database
             rec = Bio.SeqRecord.SeqRecord(id = line[5], seq = sequence)
+            print(fastgear.name)
             query_lineages[line[2]].append(rec)
 
 
     for query in query_lineages:
         # Print out external recombination events
         if query > max_lineage:
-            Bio.SeqIO.write(query_lineages[query], "{0}/external_recombinations.fa".format(os.path.abspath(fastgear.path)), "fasta")
+#            Bio.SeqIO.write(query_lineages[query], "{0}/external_recombinations.fa".format(os.path.abspath(fastgear.path)), "fasta")
             continue
 
         filename = "{0}/lineage_{1}_query.fa".format(os.path.abspath(fastgear.path), query)

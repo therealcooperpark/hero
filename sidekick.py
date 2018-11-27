@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser(description = "Use before HERO to extract indiv
 parser.add_argument("alignments", help = "Filepath to individual gene alignments")
 parser.add_argument("gffs", help = "Filepath to GFF files")
 parser.add_argument("--cluster_file", metavar = '', default = "./clustered_proteins", help = "Filepath to the 'clustered_proteins' output of Roary [./clustered_proteins]")
-parser.add_argument("--output", metavar = '', default = "Core_Genome_alignments", help = "Filepath to output directory for core genome protein files. [Core_Genome_alignments]")
+parser.add_argument("--output", metavar = '', default = ".", help = "Filepath to output directory for core genome protein files. [Core_Genome_alignments]")
 #parser.add_argument("--raxml", action = 'store_true', help = "Run RAxML on every core gene")
 parser.add_argument("--fastGEAR", action = 'store_true', help = "Run fastGEAR on every core gene")
 args = parser.parse_args()
@@ -169,8 +169,8 @@ def fastGEAR(final_out, directory):
         subprocess.run("fastGEAR ./{0} ./gene_fastgear ~/../shared/coopers_programs/fG_input_specs.txt".format(alignment.name), shell = True)
         os.chdir("../../")
         
-if args.raxml:
-    RAxML(final_out)
+#if args.raxml:
+#    RAxML(final_out)
 
 if args.fastGEAR:
     directory = make_directory("{0}/core_gene_fastgears".format(args.output))
