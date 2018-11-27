@@ -22,9 +22,8 @@ It also includes **sidekick.py** which can be used to run fastGEAR on each indiv
 ## INSTALLATION
 HERO has the following dependencies:
 - NCBI-blast+
-
-Optional Dependencies:
 - fastGEAR
+Optional Dependencies:
 - Roary
 
 ### Download command:
