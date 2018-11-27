@@ -1,7 +1,7 @@
 # HERO
 **H**ighways **E**numerated by **R**ecombination **O**bservations
 
-HERO is a pipeline designed to parse and visualize highways of genome-wide recombination using the output of the recombination detection tool fastGEAR. Currently, it works in 3 steps:
+HERO is a pipeline, written in Python, designed to parse and visualize highways of genome-wide recombination using the output of the recombination detection tool fastGEAR. Currently, it works in 3 steps:
 
 1) For each recombined DNA fragment, uses BLASTN to find the most likely donor from the fastGEAR donor cluster.
 
@@ -12,11 +12,11 @@ HERO is a pipeline designed to parse and visualize highways of genome-wide recom
 
 It also includes **sidekick.py** which can be used to run fastGEAR on each individual core-gene following Roary. It works by:
 
-1) Using Roary's *clustered_proteins* file to find core genes in the pan-genome and extracting individual gene alignments from *pan_genome_sequences* directory.
+1) Using Roary's *clustered_proteins* file to find core genes in the pan-genome and extracting individual gene alignments from *pan_genome_sequences* directory (requires the use of -z command).
 
 2) Uses Roary's original input gff files to rename FASTA headers in each alignment file to the original gff name rather than gene ID
 
-3) *optionally* runs fastGEAR on each renamed gene_alignment. Immediately ready for HERO
+3) *optionally* runs fastGEAR on each renamed gene alignment. Results are immediately ready for HERO
 
 
 ## INSTALLATION
