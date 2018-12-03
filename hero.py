@@ -138,7 +138,6 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
 
             # Prep fasta format for sequence fragment, then blast against lineage database
             rec = Bio.SeqRecord.SeqRecord(id = line[5], seq = sequence)
-            print(fastgear.name)
             query_lineages[line[2]].append(rec)
 
 
@@ -273,12 +272,18 @@ def itol_out(recomb_dict):
     # Write out files
     for num,file in enumerate([highways, non_highways]):
         if num == 0:
-            name = "highways"
+            if args.pairs:
+                name = "Direction_influenced_highways"
+            else:
+                name = "Highways"
             color = ",".join(highway_color)
             legend_shapes = "1,1,1,1"
             legend_labels = "{0},{1},{2},{3}".format(twenty_fifth, fiftieth, seventy_fifth, hundredth)
         else:
-            name = "recombination"
+            if args.pairs:
+                name = "Direction_influenced_recombination"
+            else:
+                name = "Recombination"
             color = non_highway_color
             legend_shapes = "1"
             legend_labels = name
@@ -287,7 +292,7 @@ def itol_out(recomb_dict):
             # Set mandatory information
             itol.write("DATASET_CONNECTION\n\n")
             itol.write("SEPARATOR COMMA\n\n")
-            itol.write("DATASET_LABEL,Recombination {0}\n\n".format(name))
+            itol.write("DATASET_LABEL,{0}\n\n".format(name))
             itol.write("COLOR,#ff0ff0\n\n")
 
             # Set Legend information
@@ -370,7 +375,7 @@ for gene_dict in gene_dicts:
 
 output_writer(final_rec_events)
 itol_out(final_rec_events)
-with open("bad_genes.txt", "w") as bad: # Write out any failed genes for further evaluation
+with open("HERO_failed_genes.txt", "w") as bad: # Write out any failed genes for further evaluation
     for gene in bad_genes:
         bad.write("{0}\n".format(gene))
 
