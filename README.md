@@ -23,6 +23,7 @@ It also includes **sidekick.py** which can be used to run fastGEAR on each indiv
 HERO has the following dependencies:
 - NCBI-blast+
 - fastGEAR
+
 Optional Dependencies:
 - Roary
 
