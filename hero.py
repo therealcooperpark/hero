@@ -273,17 +273,17 @@ def itol_out(recomb_dict):
     for num,file in enumerate([highways, non_highways]):
         if num == 0:
             if args.pairs:
-                name = "Direction_influenced_highways"
+                name = "Directionless_Highways"
             else:
-                name = "Highways"
+                name = "Direction_based_Highways"
             color = ",".join(highway_color)
             legend_shapes = "1,1,1,1"
             legend_labels = "{0},{1},{2},{3}".format(twenty_fifth, fiftieth, seventy_fifth, hundredth)
         else:
             if args.pairs:
-                name = "Direction_influenced_recombination"
+                name = "Directionless_recombination"
             else:
-                name = "Recombination"
+                name = "Direction_based_Recombination"
             color = non_highway_color
             legend_shapes = "1"
             legend_labels = name
@@ -296,7 +296,7 @@ def itol_out(recomb_dict):
             itol.write("COLOR,#ff0ff0\n\n")
 
             # Set Legend information
-            itol.write("LEGEND_TITLE,Recombination Highways\n")
+            itol.write("LEGEND_TITLE,{0}\n".format(name))
             itol.write("LEGEND_SHAPES,{0}\n".format(legend_shapes))
             itol.write("LEGEND_COLORS,{0}\n".format(color))
             itol.write("LEGEND_LABELS,{0}\n\n".format(legend_labels))
