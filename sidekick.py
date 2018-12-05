@@ -10,14 +10,15 @@ import string
 import subprocess
 
 # Arguments
-parser = argparse.ArgumentParser(description = "Use before HERO to extract individual alignment files for each core gene in pan-genome. Will also run fastGEAR individually on genes.", usage = "sidekick.py [options] alignments gffs")
+parser = argparse.ArgumentParser(description = "Use before HERO to extract individual alignment files for each core gene in pan-genome. Will also run fastGEAR individually on genes.", usage = "sidekick.py [options] gffs")
 parser.add_argument("gffs", help = "Filepath to GFF files")
-parser.add_argument("--core", action = 'store_true', help = "Compile all core genes found in --cluster_file present in at least 99% of isolates into their own directory.")
-parser.add_argument("--accessory", action = 'store_true', help = "Compile all accessory genes found in --cluster_file present in at least 2 isolates into their own directory.")
-parser.add_argument("--alignments", metavar = '', default = "./pan_genome_sequences", help = "Filepath to individual gene alignments, Roary = pan_genome_sequences")
+parser.add_argument("--core", action = 'store_false', help = "Compile all core genes found in --cluster_file [True]")
+parser.add_argument("--accessory", action = 'store_true', help = "Compile all accessory genes found in --cluster_file present in at least 2 isolates, but fewer than 'core_definition' [False]")
+parser.add_argument("--core_definition", metavar = '', default = "0.99", type = float, help = "Fraction of genomes that a gene must be found in to be 'core' [0.99]")
+parser.add_argument("--alignments", metavar = '', default = "./pan_genome_sequences", help = "Filepath to individual gene alignments, [./pan_genome_sequences]")
 parser.add_argument("--cluster_file", metavar = '', default = "./clustered_proteins", help = "Filepath to the 'clustered_proteins' output of Roary [./clustered_proteins]")
-parser.add_argument("--fastGEAR", action = 'store_true', help = "Run fastGEAR on every gene toggled by --core and --accessory")
-parser.add_argument("--output", metavar = '', default = ".", help = "Filepath to output directory for core genome protein files. [.]")
+parser.add_argument("--fastGEAR", action = 'store_true', help = "Run fastGEAR on every gene collected by sidekick [False]")
+parser.add_argument("--output", metavar = '', default = ".", help = "Filepath to output directory for renamed genome protein files. [./]")
 args = parser.parse_args()
 
 
@@ -38,7 +39,7 @@ def pan_genome_extraction(cluster_file, genome_num):
 
             # Count number of occurances
             prots = line[1].split("\t")
-            if args.core and len(prots) > math.floor(genome_num * 0.99):
+            if args.core and len(prots) > math.floor(genome_num * args.core_definition):
                 core_cluster.append(group)
             elif args.accessory and len(prots) > 1 and len(prots) <= math.floor(genome_num * 0.99):
                 accessory_cluster.append(group)
@@ -148,7 +149,7 @@ def fastGEAR(final_out, directory):
 
         # Run fastgear on core gene
         os.chdir("{0}/{1}/".format(directory, gene_dir))
-        subprocess.run("fastGEAR ./{0} ./gene_fastgear ~/../shared/coopers_programs/fG_input_specs.txt".format(alignment.name), shell = True)
+        subprocess.run("fastGEAR ./{0} ./gene_fastgear /mnt/lustre/andam/shared/coopers_programs/fG_input_specs.txt".format(alignment.name), shell = True)
         os.chdir("../../")
         
 
