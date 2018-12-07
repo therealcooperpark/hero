@@ -229,10 +229,11 @@ def cleanup(fastgear):
 def stats_writer(recomb_dict, one_stdev_higher):
     # Write out recombination pairs and quantities + stats
     recombination = 0
+    pair_num = 0
     highway_recomb = 0
     highway_num = 0
 
-    filename = "highways.txt"
+    filename = "recombination_pairs.txt"
     print("Writing out results to {0}...".format(filename))
     with open("{0}/{1}".format(args.output, filename), "w") as hero:
         hero.write("Donor:Recipient\tEvents\n")
@@ -242,15 +243,56 @@ def stats_writer(recomb_dict, one_stdev_higher):
             hero.write("{0}\t{1}\n".format(event, recomb_num))
 
             recombination += recomb_num
+            pair_num += 1
             if recomb_num >= one_stdev_higher:
                 highway_recomb += recomb_num
                 highway_num += 1
 
     with open("{0}/HERO_statistics.txt".format(args.output), "w") as output:
         output.write("Total Recombination Events: {0}\n".format(recombination))
-        output.write("Recombination Events in Highways\n: {0}".format(highway_recomb))
+        output.write("Number of recombination pairs: {0}\n".format(pair_num))
+        output.write("Recombination Events in Highways: {0}\n".format(highway_recomb))
         output.write("Number of Highways: {0}\n".format(highway_num))
+
+    # Load other output files
+    frequent_finder()
             
+
+def frequent_finder():
+    # Sort Isolates by most frequent donor and recipient
+    donors = [("placeholder", 0)]
+    recipients = [("placeholder", 0)]
+    with open("{0}/recombination_pairs.txt".format(args.output), "r") as rec_file:
+        next(rec_file)
+        for line in rec_file:
+            line = line.split()
+
+            pair,count = line[0].split(":"),int(line[1])
+            donor,recipient = pair[0], pair[1]
+
+        for pos,item in enumerate(donors):
+            if count < item[1]:
+                donors.insert(pos, (donor, count))
+
+        for pos,item in enumerate(recipients):
+            if count < item[1]:
+                recipients.insert(pos, (recipient, count))
+
+
+    donors.remove(("placeholder", 0))
+    recipients.remove(("placeholder", 0))
+
+    with open("{0}/donor_frequency.txt".format(args.output), "w") as output:
+        output.write("Donor\tCount\n")
+        for donor in donors:
+            output.write("{0}\t{1}\n".format(donor[0], donor[1]))
+
+
+    with open("{0}/recipient_frequency.txt".format(args.output), "w") as output:
+        output.write("Recipient\tCount\n")
+        for recipient in recipients:
+            output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
+
 
 def itol_out(recomb_dict, one_stdev_higher):
     print("Total number of recombination pairs: {0}".format(len(recomb_dict)))
@@ -332,9 +374,6 @@ def itol_out(recomb_dict, one_stdev_higher):
             itol.write("DATA\n")
             for pair in file:
                 itol.write("{0},{1},15,{2}\n".format(file[pair][0], file[pair][1], file[pair][3]))
-#                itol.write("{0},{1},{2},{3}\n".format(file[pair][0], file[pair][1], file[pair][2], file[pair][3]))
-
-
 
 
 
@@ -393,13 +432,15 @@ for gene_dict in gene_dicts:
 
 
 
-
+# Calculate Highway definition
 one_stdev_higher = (sum(final_rec_events.values()) / len(final_rec_events.values())) + statistics.pstdev(final_rec_events.values())
+
+# Write output files
 stats_writer(final_rec_events, one_stdev_higher)
 itol_out(final_rec_events, one_stdev_higher)
 with open("{0}/HERO_failed_genes.txt".format(args.output), "w") as bad: # Write out any failed genes for further evaluation
     for gene in bad_genes:
         bad.write("{0}\n".format(gene))
 
-
+# Write out time table
 print("Finished in {0}".format(time.time() - t0))
