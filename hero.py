@@ -24,6 +24,7 @@ parser.add_argument("--pairs", action = "store_true", help = "Ignore direction o
 parser.add_argument("--cleanup", action = "store_false", help = "Keep intermediate files.")
 parser.add_argument("--cpus", metavar = '', default = 1, type = int, help = "Number of threads to use. [1]")
 parser.add_argument("--nohighway", metavar = '', default = "#D3D3D3", help = "Hexadecimal code for non-highway color in output file [#D3D3D3]")
+parser.add_argument("--output", metavar = '', default = "HERO", help = "Output directory for HERO files")
 #parser.add_argument("--highway", default = "#0000FF", help = "Hexadecimal code for highway color in output file")
 args = parser.parse_args()
 
@@ -58,6 +59,7 @@ def lineage_fastas(fastgear):
     fg_strains = {} # Collection of all strains in class Strains.
     query_lineages = {} # Sequences for query of blast, sorted by lineage
     # Parse and sort strain alignments by lineage, build blast DB for each file
+
     try:
         with open("{0}/output/lineage_information.txt".format(os.path.abspath(fastgear.path)), "r") as file:
             next(file)
@@ -224,22 +226,36 @@ def cleanup(fastgear):
         if "lineage" in file.name:
             os.remove(file.path)
 
-def output_writer(recomb_dict):
-    # Write out recombination pairs and quantities
+def stats_writer(recomb_dict, one_stdev_higher):
+    # Write out recombination pairs and quantities + stats
+    recombination = 0
+    highway_recomb = 0
+    highway_num = 0
+
     filename = "highways.txt"
     print("Writing out results to {0}...".format(filename))
-    with open(filename, "w") as higear:
-        higear.write("Donor:Recipient\tEvents\n")
+    with open("{0}/{1}".format(args.output, filename), "w") as hero:
+        hero.write("Donor:Recipient\tEvents\n")
+
         for event in recomb_dict:
-            higear.write("{0}\t{1}\n".format(event, recomb_dict[event]))
+            recomb_num = recomb_dict[event]
+            hero.write("{0}\t{1}\n".format(event, recomb_num))
 
+            recombination += recomb_num
+            if recomb_num >= one_stdev_higher:
+                highway_recomb += recomb_num
+                highway_num += 1
 
-def itol_out(recomb_dict):
+    with open("{0}/HERO_statistics.txt".format(args.output), "w") as output:
+        output.write("Total Recombination Events: {0}\n".format(recombination))
+        output.write("Recombination Events in Highways\n: {0}".format(highway_recomb))
+        output.write("Number of Highways: {0}\n".format(highway_num))
+            
+
+def itol_out(recomb_dict, one_stdev_higher):
     print("Total number of recombination pairs: {0}".format(len(recomb_dict)))
     non_highway_color = args.nohighway
     highway_color = ["#FFFF00","#FFA500","#D17B0F","#DF0B0B"]
-    # one_stdev_higher = mean + pop_stdev
-    one_stdev_higher = (sum(recomb_dict.values()) / len(recomb_dict.values())) + statistics.pstdev(recomb_dict.values())
     max_recomb = max(recomb_dict.values())
     print("Writing iToL file...")
     highways = {}
@@ -288,7 +304,7 @@ def itol_out(recomb_dict):
             legend_shapes = "1"
             legend_labels = name
 
-        with open("{0}_hero_itol.txt".format(name), "w") as itol:
+        with open("{0}/{1}_hero_itol.txt".format(args.output, name), "w") as itol:
             # Set mandatory information
             itol.write("DATASET_CONNECTION\n\n")
             itol.write("SEPARATOR COMMA\n\n")
@@ -336,6 +352,11 @@ bad_genes = []
 cwd = os.getcwd()
 final_rec_events = {}
 
+try:
+    os.mkdir(args.output)
+except IOError:
+    pass
+
 # Iterate over every gene and add to global recombination dictionary *Multi-threaded section*
 gene_dicts = []
 for i in os.scandir(args.fastgear):
@@ -373,9 +394,10 @@ for gene_dict in gene_dicts:
 
 
 
-output_writer(final_rec_events)
-itol_out(final_rec_events)
-with open("HERO_failed_genes.txt", "w") as bad: # Write out any failed genes for further evaluation
+one_stdev_higher = (sum(final_rec_events.values()) / len(final_rec_events.values())) + statistics.pstdev(final_rec_events.values())
+stats_writer(final_rec_events, one_stdev_higher)
+itol_out(final_rec_events, one_stdev_higher)
+with open("{0}/HERO_failed_genes.txt".format(args.output), "w") as bad: # Write out any failed genes for further evaluation
     for gene in bad_genes:
         bad.write("{0}\n".format(gene))
 
