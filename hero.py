@@ -262,35 +262,56 @@ def frequent_finder():
     # Sort Isolates by most frequent donor and recipient
     donors = [("placeholder", 0)]
     recipients = [("placeholder", 0)]
+    recomb_parse_dict = {}
     with open("{0}/recombination_pairs.txt".format(args.output), "r") as rec_file:
         next(rec_file)
+        # Sort recombination_pairs into donor/recipient frequencies        
         for line in rec_file:
             line = line.split()
 
             pair,count = line[0].split(":"),int(line[1])
             donor,recipient = pair[0], pair[1]
 
-        for pos,item in enumerate(donors):
-            if count < item[1]:
-                donors.insert(pos, (donor, count))
+            recomb_parse_dict.setdefault(donor, [0,0])
+            recomb_parse_dict.setdefault(recipient, [0,0])
 
-        for pos,item in enumerate(recipients):
-            if count < item[1]:
-                recipients.insert(pos, (recipient, count))
+            recomb_parse_dict[donor][0] += count
+            recomb_parse_dict[recipient][1] += count
 
 
+    # Sort values into donor/recipient lists based on frequency
+    for isolate in recomb_parse_dict:
+        d_trig = 0
+        for pos,donor in enumerate(donors):
+            if recomb_parse_dict[isolate][0] < donor[1]:
+                donors.insert(pos, (isolate, recomb_parse_dict[isolate][0]))
+                d_trig = 1
+                break
+        if d_trig == 0:
+            donors.append((isolate, recomb_parse_dict[isolate][0]))
+
+        r_trig = 0
+        for pos,recipient in enumerate(recipients):
+            if recomb_parse_dict[isolate][1] < recipient[1]:
+                recipients.insert(pos, (isolate, recomb_parse_dict[isolate][1]))
+                r_trig = 1
+                break
+        if r_trig == 0:
+            recipients.insert(pos, (isolate, recomb_parse_dict[isolate][1]))
+
+    # Remove placeholders
     donors.remove(("placeholder", 0))
     recipients.remove(("placeholder", 0))
 
+    # Write out donor/recipient frequencies
     with open("{0}/donor_frequency.txt".format(args.output), "w") as output:
         output.write("Donor\tCount\n")
-        for donor in donors:
+        for donor in reversed(donors):
             output.write("{0}\t{1}\n".format(donor[0], donor[1]))
-
 
     with open("{0}/recipient_frequency.txt".format(args.output), "w") as output:
         output.write("Recipient\tCount\n")
-        for recipient in recipients:
+        for recipient in reversed(recipients):
             output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
 
 
