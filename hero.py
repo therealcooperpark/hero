@@ -291,39 +291,57 @@ def frequent_finder(pair_file, d_file, r_file):
 
 
     # Sort values into donor/recipient lists based on frequency
+    d_count = []
+    r_count = []
     for isolate in recomb_parse_dict:
+        donation = recomb_parse_dict[isolate][0]
+        receipt = recomb_parse_dict[isolate][1]
+
         d_trig = 0
         for pos,donor in enumerate(donors):
-            if recomb_parse_dict[isolate][0] < donor[1]:
-                donors.insert(pos, (isolate, recomb_parse_dict[isolate][0]))
+            if donation < donor[1]:
+                donors.insert(pos, (isolate, donation))
                 d_trig = 1
                 break
         if d_trig == 0:
-            donors.append((isolate, recomb_parse_dict[isolate][0]))
+            donors.append((isolate, donation))
+        d_count.append(donation)
+
 
         r_trig = 0
         for pos,recipient in enumerate(recipients):
-            if recomb_parse_dict[isolate][1] < recipient[1]:
-                recipients.insert(pos, (isolate, recomb_parse_dict[isolate][1]))
+            if receipt < recipient[1]:
+                recipients.insert(pos, (isolate, receipt))
                 r_trig = 1
                 break
         if r_trig == 0:
-            recipients.insert(pos, (isolate, recomb_parse_dict[isolate][1]))
+            recipients.insert(pos, (isolate, receipt))
+        r_count.append(receipt)
 
     # Remove placeholders
     donors.remove(("placeholder", 0))
     recipients.remove(("placeholder", 0))
 
+    # Define frequent donors/recipients
+    d_one_stdev_higher = (sum(d_count) / len(d_count)) + statistics.pstdev(d_count)
+    r_one_stdev_higher = (sum(r_count) / len(r_count)) + statistics.pstdev(r_count)
+
     # Write out donor/recipient frequencies
     with open("{0}/{1}".format(args.output, d_file), "w") as output:
-        output.write("Donor\tCount\n")
+        output.write("Donor\tCount\t*** means significant\n")
         for donor in reversed(donors):
-            output.write("{0}\t{1}\n".format(donor[0], donor[1]))
+            if donor[1] >= d_one_stdev_higher:
+                output.write("{0}\t{1}***\n".format(donor[0], donor[1]))
+            else:
+                output.write("{0}\t{1}\n".format(donor[0], donor[1]))
 
     with open("{0}/{1}".format(args.output, r_file), "w") as output:
-        output.write("Recipient\tCount\n")
+        output.write("Recipient\tCount\t*** means significant\n")
         for recipient in reversed(recipients):
-            output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
+            if recipient[1] >= r_one_stdev_higher:
+                output.write("{0}\t{1}***\n".format(recipient[0], recipient[1]))
+            else:
+                output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
 
 def filtering(final_rec_events):
     # Sort recombination events by user list
