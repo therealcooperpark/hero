@@ -126,6 +126,8 @@ def lineage_fastas(fastgear):
 
 def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
     # Parse recombination events and build query blast files
+
+    recomb_frags = {} # Recombination Event sizes
     with open("{0}/output/recombinations_recent.txt".format(os.path.abspath(fastgear.path)), "r") as recomb_file:
         next(recomb_file)
         next(recomb_file)
@@ -147,10 +149,12 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             if end_idx - start_idx <= args.length:
                 continue
             sequence = recipient.fasta.seq[start_idx:end_idx]
+            identity = "{0}:{1}:{2}".format(line[5],start_idx,end_idx)
+            recomb_frags[identity] = str(len(sequence)) # Log recombination fragment size
             sequence = unalignment(sequence)
 
             # Prep fasta format for sequence fragment, then blast against lineage database
-            rec = Bio.SeqRecord.SeqRecord(id = line[5], seq = sequence)
+            rec = Bio.SeqRecord.SeqRecord(id = identity, seq = sequence)
             query_lineages[line[2]].append(rec)
 
 
@@ -184,7 +188,7 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
                 continue
             
             # Parse BLAST Results
-            key = "{0}:{1}".format(entry[0], entry[1])
+            key = "{0}:{1}".format(entry[0].split(":")[0], entry[1])
             a = int(entry[8])
             b = int(entry[9])
 
@@ -203,7 +207,7 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             # Note recombination event if no overlap exists
             recombination_events.setdefault(key, [])
             if not overlap:
-                recombination_events[key].append((1, (b-a), fastgear.name))
+                recombination_events[key].append((1, recomb_frags[entry[0]], fastgear.name))
             get_event = 0
 
     if args.cleanup == True:
