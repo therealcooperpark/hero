@@ -149,9 +149,9 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             if end_idx - start_idx <= args.length:
                 continue
             sequence = recipient.fasta.seq[start_idx:end_idx]
+            sequence = unalignment(sequence)
             identity = "{0}:{1}:{2}".format(line[5],start_idx,end_idx)
             recomb_frags[identity] = str(len(sequence)) # Log recombination fragment size
-            sequence = unalignment(sequence)
 
             # Prep fasta format for sequence fragment, then blast against lineage database
             rec = Bio.SeqRecord.SeqRecord(id = identity, seq = sequence)
