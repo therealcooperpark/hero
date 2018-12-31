@@ -146,10 +146,10 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             if start_idx < 1: # Recombined seqs can still have hyphens at the start. Trim value will force start index negative
                 start_idx = 1 # This is the base case to avoid that, while letting the trim properly manage the end index.
             end_idx = int(line[1]) - 1
-            if end_idx - start_idx <= args.length:
-                continue
             sequence = recipient.fasta.seq[start_idx:end_idx]
             sequence = unalignment(sequence)
+            if len(sequence) <= args.length:
+                continue
             identity = "{0}:{1}:{2}".format(line[5],start_idx,end_idx)
             recomb_frags[identity] = str(len(sequence)) # Log recombination fragment size
 
