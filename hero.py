@@ -125,6 +125,7 @@ def lineage_fastas(fastgear):
 
 
 def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
+    
     # Parse recombination events and build query blast files
 
     recomb_frags = {} # Recombination Event sizes
@@ -554,6 +555,7 @@ def write_out(label, cat):
 
 ####### Main script #######
 print("Finding Donors for all recombination events...", flush=True)
+
 class PsuedoDirEntry:
     # Allows multithreading of os.scandir
     def __init__(self, name, path, is_dir):
@@ -581,6 +583,7 @@ if __name__ == '__main__':
 
 
 # Sort recombination events from failed genes.
+recomb_proportions = {}
 final_rec_events = {}
 bad_genes = []
 
@@ -598,9 +601,13 @@ for gene_dict in gene_dicts:
                         break
 
             if valid == 1:
+                print(gene_dict[pair])
                 final_rec_events.setdefault(pair, [])
                 for data in gene_dict[pair]:
                     final_rec_events[pair].append(data)
+                recomb_proportions.setdefault(pair.split(":")[1], 0) # Add recombination fragment size to recipient in dictionary
+                recomb_proportions[pair.split(":")[1]] += int(gene_dict[pair][0][1]) 
+
     else:
         bad_genes.append(gene_dict)
 
@@ -614,6 +621,10 @@ with open("{0}/HERO_failed_genes.txt".format(args.output), "w") as bad: # Write 
     for gene in bad_genes:
         bad.write("{0}\n".format(gene))
 
+with open("{0}/HERO_recombination_proportions.txt".format(args.output), "w") as output: # Write out base pair total for recombination in each genome
+    output.write("Genome\tBase Pairs\n")
+    for genome in recomb_proportions:
+        output.write("{0}\t{1}\n".format(genome, recomb_proportions[genome]))
 
 # Write out runtime
 print("Finished in {0}".format(time.time() - t0), flush=True)
