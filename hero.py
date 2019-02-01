@@ -6,7 +6,7 @@ import argparse
 import Bio.SeqIO
 import itertools
 import math
-from multiprocessing import Pool
+import multiprocessing
 import os
 import random
 import statistics
@@ -32,7 +32,7 @@ args = parser.parse_args()
 
 
 def make_directory(name):
-    # Make output directory for core genome alignments
+    # Make output directory for core genome alignments, rename if already in use
     try:
         os.mkdir(name)
         out = name
@@ -50,13 +50,17 @@ def lineage_fastas(fastgear):
         print("Non-fastGEAR directory found. Skipping", flush=True)
         return fastgear.name
 
+    with open("{0}/output/recombinations_recent.txt".format(fastgear.path), "r") as file:
+        if len(file.readlines()) < 3:
+            print("No Recombination in gene: {0}".format(fastgear.name), flush = True)
+            return None
+
     # Setup main collections
     class Strains:
         alignment_length = 0 # Total alignment length will be set with each new gene processed
 
-        def __init__(self, strain_num, lineage, name):
+        def __init__(self, lineage, name):
             self.name = name
-            self.strain_num = strain_num
             self.lineage = lineage
             self.fasta = ""
             self.trim = 0
@@ -75,18 +79,18 @@ def lineage_fastas(fastgear):
     # Parse and sort strain alignments by lineage, build blast DB for each file
 
     try:
-        with open("{0}/output/lineage_information.txt".format(os.path.abspath(fastgear.path)), "r") as file:
+        with open("{0}/output/lineage_information.txt".format(fastgear.path), "r") as file:
             next(file)
             for line in file:
                 line = line.split()
-                fg_strains[line[3]] = Strains(line[0], line[1], line[3])
+                fg_strains[line[3]] = Strains(line[1], line[3])
     except FileNotFoundError:
         print("Gene {0} has an unsuccessful fastGEAR run. Skipping for results.".format(fastgear.name), flush=True)
         return fastgear.name
 
     # Identify alignment file
     alignment = ""
-    for file in os.scandir(os.path.abspath(fastgear.path)):
+    for file in os.scandir(fastgear.path):
         if file.is_file() and ".mat" not in file.name:
             try:
                 if any(Bio.SeqIO.parse(file.path, "fasta")):
@@ -101,11 +105,7 @@ def lineage_fastas(fastgear):
     for record in Bio.SeqIO.parse(alignment, "fasta"):
         fg_strains[record.id].fasta = record
         fg_strains[record.id].unaligned_fasta = record
-
-    # Unalign sequence for blast
-    for strain in fg_strains.values():	
-        sequence = unalignment(strain.unaligned_fasta.seq)
-        strain.unaligned_fasta.seq = sequence
+        fg_strains[record.id].unaligned_fasta.seq = unalignment(fg_strains[record.id].fasta.seq)
 
     # Write out reference lineage files
     for num in lineages:
@@ -113,9 +113,9 @@ def lineage_fastas(fastgear):
         for strain in lineages[num]:
             records.append(fg_strains[strain].unaligned_fasta)
 
-        Bio.SeqIO.write(records, "{0}/lineage_{1}.fa".format(os.path.abspath(fastgear.path), num), "fasta")
+        Bio.SeqIO.write(records, "{0}/lineage_{1}.fa".format(fastgear.path, num), "fasta")
 
-        blastdb = subprocess.run("makeblastdb -in {0}/lineage_{1}.fa -dbtype nucl".format(os.path.abspath(fastgear.path), num), shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        blastdb = subprocess.run("makeblastdb -in {0}/lineage_{1}.fa -dbtype nucl".format(fastgear.path, num), shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
         if blastdb.stderr:
             print(blastdb.stderr.decode('ascii'), flush=True)
             print("Revisit the gene alignment of {0} to troubleshoot. Skipping for results.".format(fastgear.name), flush=True)
@@ -125,11 +125,10 @@ def lineage_fastas(fastgear):
 
 
 def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
-    
     # Parse recombination events and build query blast files
-
+    external = []
     recomb_frags = {} # Recombination Event sizes
-    with open("{0}/output/recombinations_recent.txt".format(os.path.abspath(fastgear.path)), "r") as recomb_file:
+    with open("{0}/output/recombinations_recent.txt".format(fastgear.path), "r") as recomb_file:
         next(recomb_file)
         next(recomb_file)
         for line in recomb_file:
@@ -138,38 +137,30 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
             if float(line[4]) < args.log:
                 continue
 
-            if int(line[2]) > int(max_lineage):
-                query_lineages.setdefault(line[2], [])
 
             # Pull sequence fragment and set lineage to blast against
-            recipient = fg_strains[line[5]]
-            start_idx = int(line[0]) - 1
-            if start_idx < 1: # Recombined seqs can still have hyphens at the start. Trim value will force start index negative
-                start_idx = 1 # This is the base case to avoid that, while letting the trim properly manage the end index.
-            end_idx = int(line[1]) - 1
-            sequence = recipient.fasta.seq[start_idx:end_idx]
-            sequence = unalignment(sequence)
+            recipient, start_idx, end_idx  = fg_strains[line[5]], int(line[0]) - 1, int(line[1]) - 1
+            sequence = unalignment(recipient.fasta.seq[start_idx:end_idx])
             if len(sequence) <= args.length:
                 continue
             identity = "{0}:{1}:{2}".format(line[5],start_idx,end_idx)
             recomb_frags[identity] = str(len(sequence)) # Log recombination fragment size
 
             # Prep fasta format for sequence fragment, then blast against lineage database
-            rec = Bio.SeqRecord.SeqRecord(id = identity, seq = sequence)
-            query_lineages[line[2]].append(rec)
+            if int(line[2]) > int(max_lineage):
+                rec = Bio.SeqRecord.SeqRecord(id = "{0}:{1}".format(fastgear.name, identity), seq = sequence)
+                external.append(rec)
+            else:
+                rec = Bio.SeqRecord.SeqRecord(id = identity, seq = sequence)
+                query_lineages[line[2]].append(rec)
 
 
     rec_indexes = {}
     recombination_events = {}
     for query in query_lineages:
-        # Print out external recombination events
-        if query > max_lineage:
-#            Bio.SeqIO.write(query_lineages[query], "{0}/external_recombinations.fa".format(os.path.abspath(fastgear.path)), "fasta")
-            continue
-
-        filename = "{0}/lineage_{1}_query.fa".format(os.path.abspath(fastgear.path), query)
+        filename = "{0}/lineage_{1}_query.fa".format(fastgear.path, query)
         Bio.SeqIO.write(query_lineages[query], filename, "fasta")
-        blast_output = subprocess.run("blastn -query {0} -subject {1}/lineage_{2}.fa -evalue 1e-5 -outfmt 7 -max_hsps 1".format(filename, os.path.abspath(fastgear.path), query),\
+        blast_output = subprocess.run("blastn -query {0} -subject {1}/lineage_{2}.fa -evalue 1e-5 -outfmt 7 -max_hsps 1".format(filename, fastgear.path, query),\
             shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
 
         # Parse blast_output
@@ -206,16 +197,15 @@ def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
                 rec_indexes[key].append((a,b))
 
             # Note recombination event if no overlap exists
-            recombination_events.setdefault(key, [])
             if not overlap:
-                recombination_events[key].append((1, recomb_frags[entry[0]], fastgear.name))
+                recombination_events.setdefault(key, "")
+                recombination_events[key] = (1, recomb_frags[entry[0]], fastgear.name)
             get_event = 0
 
     if args.cleanup == True:
         cleanup(fastgear)
 
-    return recombination_events
-
+    return [recombination_events, external]
 
 def unalignment(seq):
     # Remove gap characters from sequence alignment
@@ -240,9 +230,100 @@ def seq_overlap(start, end, a, b):
 
 def cleanup(fastgear):
     # Clean intermediate files
-    for file in os.scandir(os.path.abspath(fastgear.path)):
+    for file in os.scandir(fastgear.path):
         if "lineage" in file.name:
             os.remove(file.path)
+
+
+def filtering(final_rec_events):
+    # Sort recombination events by user list
+    filters = {} # Sort strains by user categories
+    dict_dict = {"other":{}} # Keeps labels and dictionaries together
+    if args.filter:
+        try:
+            with open(args.filter, "r") as filter_list:
+                # Sort strains by category into 'filters'
+                for line in filter_list:
+                    line = line.strip().split(",")
+                    strain,cat = line[0],line[1]
+                
+                    dict_dict[cat] = {}
+                    filters[strain] = cat
+        except IOError:
+            print("Filtering file not found! Skipping filteration",flush=True)
+
+    for event in final_rec_events:
+        i = event.split(":")
+        # Test presence of strain in filter list
+        for strain in i:
+            try:
+                filters[strain]
+            except KeyError:
+                filters[strain] = "other"
+
+        # If categories are the same, add to category dictionary, otherwise add to 'other'
+        if filters[i[0]] == filters[i[1]]:
+            if filters[i[0]] == "other":
+                dict_dict['other'][event] = final_rec_events[event]
+            else:
+                dict_dict[filters[i[0]]][event] = final_rec_events[event]
+        else:
+            dict_dict['other'][event] = final_rec_events[event]
+
+    return dict_dict
+
+
+def write_out(label, cat):
+    # Calculate Highway definition
+    if len(cat) == 0:
+        print("{0} category has no recombination events. No output files to write".format(label), flush=True)
+        return None
+    # Sort recombination data
+    recomb_nums = {}
+    recomb_sizes = []
+    recomb_genes = {}
+    for pair in cat:
+        for data in cat[pair]:
+            recomb_nums.setdefault(pair, 0)
+            recomb_nums[pair] += data[0]
+
+            recomb_sizes.append(data[1])
+
+            recomb_genes.setdefault(data[2], 0)
+            recomb_genes[data[2]] += 1
+
+
+    one_stdev_higher = (sum(recomb_nums.values()) / len(recomb_nums.values())) + statistics.pstdev(recomb_nums.values())
+
+    # Write output files
+    names = name_collection(label)
+    ## ^pair_file, stat_file, d_file, r_file, gene_file, size_file
+
+    stats_writer(recomb_nums, names[0], names[1], one_stdev_higher)
+    itol_out(recomb_nums, label, one_stdev_higher)
+    gene_out(names[4], recomb_genes)
+    size_out(names[5], recomb_sizes)
+    frequent_finder(names[0], names[2], names[3])
+
+
+def name_collection(label):
+    # Assign file names for each output function call
+    if label == "other":
+        pair_file = "recombination_pairs.txt"
+        stat_file = "hero_statistics.txt"
+        d_file = "donor_frequency.txt"
+        r_file = "recipient_frequency.txt"
+        gene_file = "gene_frequency.txt"
+        size_file = "recombination_sizes.txt"
+    else:
+        pair_file = "{0}_recombination_pairs.txt".format(label)
+        stat_file = "{0}_hero_statistics.txt".format(label)
+        d_file = "{0}_donor_frequency.txt".format(label)
+        r_file = "{0}_recipient_frequency.txt".format(label)
+        gene_file = "{0}_gene_frequency.txt".format(label)
+        size_file = "{0}_recombination_sizes.txt".format(label)
+    return (pair_file, stat_file, d_file, r_file, gene_file, size_file)
+
 
 def stats_writer(recomb_dict, pair_file, stat_file, one_stdev_higher):
     # Write out recombination pairs and quantities + stats
@@ -272,6 +353,116 @@ def stats_writer(recomb_dict, pair_file, stat_file, one_stdev_higher):
         output.write("Number of Highways: {0}\n".format(highway_num))
 
             
+def itol_out(recomb_dict, label, one_stdev_higher):
+    # Write out highways/recombination in iToL format
+    print("Total number of recombination pairs in {0}: {1}".format(label, len(recomb_dict)), flush=True)
+    non_highway_color = args.nohighway
+    highway_color = ["#FFFF00","#FFA500","#D17B0F","#DF0B0B"]
+    print("Writing iToL file...", flush=True)
+    highways = {}
+    non_highways = {}
+    # Calculate stats to sort recombination pairs
+    max_recomb = max(recomb_dict.values())
+    quartile = (max_recomb - one_stdev_higher)/4
+    twenty_fifth = "{0} - {1}".format(one_stdev_higher, one_stdev_higher + quartile)
+    fiftieth = ">{0} - {1}".format(one_stdev_higher + quartile, one_stdev_higher + quartile*2)
+    seventy_fifth = ">{0} - {1}".format(one_stdev_higher + quartile*2, one_stdev_higher + quartile*3)    
+    hundredth = ">{0}".format(one_stdev_higher + quartile*3)
+    # Sort out highways and prepare for iToL writeout
+    for i in recomb_dict:
+        j = i.split(":")
+        if recomb_dict[i] >= one_stdev_higher:
+            if recomb_dict[i] <= (one_stdev_higher + quartile):
+                cur_color = highway_color[0]
+            elif recomb_dict[i] <= (one_stdev_higher + quartile*2):
+                cur_color = highway_color[1]
+            elif recomb_dict[i] <= (one_stdev_higher + quartile*3):
+                cur_color = highway_color[2]
+            else:
+                cur_color = highway_color[3]
+            highways[i] = (j[0], j[1], recomb_dict[i], cur_color)
+        else:
+            non_highways[i] = (j[0], j[1], recomb_dict[i], non_highway_color)
+
+    if len(highways) > 0:
+        collection = [highways, non_highways]
+    else:
+        collection = [non_highways]
+        print("No Highways in {0}".format(label), flush=True)
+        # Calculate percentiles for highway coverage
+        # Write out files
+    count = 0
+    for file in collection:
+        if len(collection) > 1 and count == 0:
+            count += 1
+            if args.pairs:
+                name = "{0}_Indiscriminant_Highways".format(label)
+            else:
+                name = "{0}_Discriminant_Highways".format(label)
+            color = ",".join(highway_color)
+            legend_shapes = "1,1,1,1"
+            legend_labels = "{0},{1},{2},{3}".format(twenty_fifth, fiftieth, seventy_fifth, hundredth)
+        else:
+            if args.pairs:
+                name = "{0}_Indiscriminant_recombination".format(label)
+            else:
+                name = "{0}_Discriminant_Recombination".format(label)
+            color = non_highway_color
+            legend_shapes = "1"
+            legend_labels = name
+
+        with open("{0}/{1}_hero_itol.txt".format(args.output, name), "w") as itol:
+            # Set mandatory information
+            itol.write("DATASET_CONNECTION\n\nSEPARATOR COMMA\n\nDATASET_LABEL,{0}\n\nCOLOR,#ff0ff0\n\n".format(name))
+
+            # Set Legend information
+            itol.write("LEGEND_TITLE,{0}\n".format(name))
+            itol.write("LEGEND_SHAPES,{0}\n".format(legend_shapes))
+            itol.write("LEGEND_COLORS,{0}\n".format(color))
+            itol.write("LEGEND_LABELS,{0}\n\n".format(legend_labels))
+
+            # Set arrow information
+            if args.pairs:
+                itol.write("DRAW_ARROWS,0\n")
+            else:
+                itol.write("DRAW_ARROWS,1\n")
+            itol.write("ARROW_SIZE,60\nMAXIMUM_LINE_WIDTH,5\nCURVE_ANGLE,0\nCENTER_CURVES,1\nALIGN_TO_LABELS,0\n\n")
+
+            # Set Data for branches
+            itol.write("DATA\n")
+            for pair in file:
+                itol.write("{0},{1},15,{2}\n".format(file[pair][0], file[pair][1], file[pair][3]))
+
+
+def gene_out(gene_file, recomb_genes):
+    # Write out file showing recombination frequency of genes
+    print("Writing out gene recombination file...", flush=True)
+    sorted_genes = [("placeholder",0)]
+    for gene in recomb_genes:
+        found = 0
+        for pos,gene2 in enumerate(sorted_genes):
+            if recomb_genes[gene] < gene2[1]:
+                sorted_genes.insert(pos, (gene, recomb_genes[gene]))
+                found = 1
+                break
+        if found == 0:
+            sorted_genes.append((gene, recomb_genes[gene]))
+    sorted_genes.remove(("placeholder",0))
+
+
+    with open("{0}/{1}".format(args.output, gene_file), "w") as output:
+        output.write("gene\tfrequency\n")
+        for gene in sorted_genes:
+            output.write("{0}\t{1}\n".format(gene[0],gene[1]))
+
+
+def size_out(size_file, recomb_sizes):
+    # Write out recombination sizes
+    print("Writing out recombination size file...", flush=True)
+    with open("{0}/{1}".format(args.output, size_file), "w") as output:
+        for fragment in recomb_sizes:
+            output.write("{0}\n".format(fragment))
+
 
 def frequent_finder(pair_file, d_file, r_file):
     # Sort Isolates by most frequent donor and recipient
@@ -348,209 +539,6 @@ def frequent_finder(pair_file, d_file, r_file):
             else:
                 output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
 
-def filtering(final_rec_events):
-    # Sort recombination events by user list
-    filters = {} # Sort strains by user categories
-    other = {} # Dictionary of no category pairs
-    dict_dict = {"other":{}} # Keeps labels and dictionaries together
-    if args.filter:
-        try:
-            with open(args.filter, "r") as filter_list:
-                # Sort strains by category into 'filters'
-                for line in filter_list:
-                    line = line.strip().split(",")
-                    strain,cat = line[0],line[1]
-                
-                    dict_dict[cat] = {}
-                    filters[strain] = cat
-        except IOError:
-            print("Filtering file not found! Skipping filteration",flush=True)
-
-    for event in final_rec_events:
-        i = event.split(":")
-        # Test presence of strain in filter list
-        for strain in i:
-            try:
-                filters[strain]
-            except KeyError:
-                filters[strain] = "other"
-
-        # If categories are the same, add to category dictionary, otherwise add to 'other'
-        if filters[i[0]] == filters[i[1]]:
-            if filters[i[0]] == "other":
-                dict_dict['other'][event] = final_rec_events[event]
-            else:
-                dict_dict[filters[i[0]]][event] = final_rec_events[event]
-        else:
-            dict_dict['other'][event] = final_rec_events[event]
-
-    return dict_dict
-
-
-def itol_out(recomb_dict, label, one_stdev_higher):
-    print("Total number of recombination pairs in {0}: {1}".format(label, len(recomb_dict)), flush=True)
-    non_highway_color = args.nohighway
-    highway_color = ["#FFFF00","#FFA500","#D17B0F","#DF0B0B"]
-    max_recomb = max(recomb_dict.values())
-    print("Writing iToL file...", flush=True)
-    highways = {}
-    non_highways = {}
-    highway_recomb_values = []
-    # Sort out highways and prepare for iToL writeout
-    for i in recomb_dict:
-        j = i.split(":")
-        if recomb_dict[i] >= one_stdev_higher:
-            if recomb_dict[i] <= math.ceil(max_recomb*0.25):
-                cur_color = highway_color[0]
-            elif recomb_dict[i] <= math.ceil(max_recomb*0.50):
-                cur_color = highway_color[1]
-            elif recomb_dict[i] <= math.ceil(max_recomb*0.75):
-                cur_color = highway_color[2]
-            else:
-                cur_color = highway_color[3]
-            highways[i] = (j[0], j[1], recomb_dict[i], cur_color)
-            highway_recomb_values.append(recomb_dict[i])
-        else:
-            non_highways[i] = (j[0], j[1], recomb_dict[i], non_highway_color)
-
-    if len(highway_recomb_values) != 0:
-        # Calculate percentiles for highway coverage
-        min_recomb = min(highway_recomb_values)
-        quartile = math.ceil((max_recomb - min_recomb) / 4)
-        twenty_fifth = "{0} - {1}".format(min_recomb, min_recomb + quartile)
-        fiftieth = "{0} - {1}".format(min_recomb + quartile + 1, min_recomb + quartile*2)
-        seventy_fifth = "{0} - {1}".format(min_recomb + quartile*2 + 1, min_recomb + quartile*3)    
-        hundredth = ">{0}".format(min_recomb + quartile*3)
-        # Write out files
-        for num,file in enumerate([highways, non_highways]):
-            if num == 0:
-                if args.pairs:
-                    name = "{0}_Directionless_Highways".format(label)
-                else:
-                    name = "{0}_Direction_based_Highways".format(label)
-                color = ",".join(highway_color)
-                legend_shapes = "1,1,1,1"
-                legend_labels = "{0},{1},{2},{3}".format(twenty_fifth, fiftieth, seventy_fifth, hundredth)
-            else:
-                if args.pairs:
-                    name = "{0}_Directionless_recombination".format(label)
-                else:
-                    name = "{0}_Direction_based_Recombination".format(label)
-                color = non_highway_color
-                legend_shapes = "1"
-                legend_labels = name
-
-            with open("{0}/{1}_hero_itol.txt".format(args.output, name), "w") as itol:
-                # Set mandatory information
-                itol.write("DATASET_CONNECTION\n\n")
-                itol.write("SEPARATOR COMMA\n\n")
-                itol.write("DATASET_LABEL,{0}\n\n".format(name))
-                itol.write("COLOR,#ff0ff0\n\n")
-
-                # Set Legend information
-                itol.write("LEGEND_TITLE,{0}\n".format(name))
-                itol.write("LEGEND_SHAPES,{0}\n".format(legend_shapes))
-                itol.write("LEGEND_COLORS,{0}\n".format(color))
-                itol.write("LEGEND_LABELS,{0}\n\n".format(legend_labels))
-
-                # Set arrow information
-                if args.pairs:
-                    itol.write("DRAW_ARROWS,0\n")
-                else:
-                    itol.write("DRAW_ARROWS,1\n")
-                itol.write("ARROW_SIZE,60\n")
-                itol.write("MAXIMUM_LINE_WIDTH,5\n")
-                itol.write("CURVE_ANGLE,0\n")
-                itol.write("CENTER_CURVES,1\n")
-                itol.write("ALIGN_TO_LABELS,0\n\n")
-
-                # Set Data for branches
-                itol.write("DATA\n")
-                for pair in file:
-                    itol.write("{0},{1},15,{2}\n".format(file[pair][0], file[pair][1], file[pair][3]))
-
-    else:
-        print("No Highways in {0}".format(label), flush=True)
-
-
-def gene_out(gene_file, recomb_genes):
-    # Sort by frequncy and write to file
-    print("Writing out gene recombination file...", flush=True)
-    sorted_genes = [("placeholder",0)]
-    for gene in recomb_genes:
-        found = 0
-        for pos,gene2 in enumerate(sorted_genes):
-            if recomb_genes[gene] < gene2[1]:
-                sorted_genes.insert(pos, (gene, recomb_genes[gene]))
-                found = 1
-                break
-        if found == 0:
-            sorted_genes.append((gene, recomb_genes[gene]))
-    sorted_genes.remove(("placeholder",0))
-
-
-    with open("{0}/{1}".format(args.output, gene_file), "w") as output:
-        output.write("gene\tfrequency\n")
-        for gene in sorted_genes:
-            output.write("{0}\t{1}\n".format(gene[0],gene[1]))
-
-
-def size_out(size_file, recomb_sizes):
-    # Write out recombination sizes
-    print("Writing out recombination size file...", flush=True)
-    with open("{0}/{1}".format(args.output, size_file), "w") as output:
-        for fragment in recomb_sizes:
-            output.write("{0}\n".format(fragment))
-
-
-def name_collection(label):
-    if label == "other":
-        pair_file = "recombination_pairs.txt"
-        stat_file = "HERO_statistics.txt"
-        d_file = "donor_frequency.txt"
-        r_file = "recipient_frequency.txt"
-        gene_file = "gene_frequency.txt"
-        size_file = "recombination_sizes.txt"
-    else:
-        pair_file = "{0}_recombination_pairs.txt".format(label)
-        stat_file = "{0}_HERO_statistics.txt".format(label)
-        d_file = "{0}_donor_frequency.txt".format(label)
-        r_file = "{0}_recipient_frequency.txt".format(label)
-        gene_file = "{0}_gene_frequency.txt".format(label)
-        size_file = "{0}_recombination_sizes.txt".format(label)
-    return (pair_file, stat_file, d_file, r_file, gene_file, size_file)
-
-def write_out(label, cat):  
-    # Calculate Highway definition
-    if len(cat) == 0:
-        print("{0} category has no recombination events. No output files to write".format(label), flush=True)
-        return None
-    # Sort recombination data
-    recomb_nums = {}
-    recomb_sizes = []
-    recomb_genes = {}
-    for pair in cat:
-        for data in cat[pair]:
-            recomb_nums.setdefault(pair, 0)
-            recomb_nums[pair] += data[0]
-
-            recomb_sizes.append(data[1])
-
-            recomb_genes.setdefault(data[2], 0)
-            recomb_genes[data[2]] += 1
-
-
-    one_stdev_higher = (sum(recomb_nums.values()) / len(recomb_nums.values())) + statistics.pstdev(recomb_nums.values())
-
-    # Write output files
-    names = name_collection(label)
-    ## ^pair_file, stat_file, d_file, r_file, gene_file, size_file
-
-    stats_writer(recomb_nums, names[0], names[1], one_stdev_higher)
-    itol_out(recomb_nums, label, one_stdev_higher)
-    gene_out(names[4], recomb_genes)
-    size_out(names[5], recomb_sizes)
-    frequent_finder(names[0], names[2], names[3])
 
 
 ####### Main script #######
@@ -560,54 +548,46 @@ class PsuedoDirEntry:
     # Allows multithreading of os.scandir
     def __init__(self, name, path, is_dir):
         self.name = name
-        self.path = path
+        self.path = os.path.abspath(path)
         self.is_dir = is_dir
-
 
 # Make a directory for the output files
 args.output = make_directory(args.output)
 
 # Iterate over every gene and add to global recombination dictionary *Multi-threaded section*
 gene_dicts = [] # Each item in list is dictionary. Key - Recombination Pair. Value - Tuple of data (# of recomb events, length of event, gene recombined in)
-
-for i in os.scandir(args.fastgear):
-    gene_dicts.append(PsuedoDirEntry(i.name, i.path, i.is_dir()))
-
-if __name__ == '__main__':
-    pool = Pool(processes=args.cpus)
-
-    gene_dicts = pool.map(lineage_fastas, gene_dicts)
-
-    pool.close()
-    pool.join()
-
-
-# Sort recombination events from failed genes.
+external = []
 recomb_proportions = {}
 final_rec_events = {}
 bad_genes = []
 
+for i in os.scandir(args.fastgear):
+    gene_dicts.append(PsuedoDirEntry(i.name, i.path, i.is_dir()))
+
+pool = multiprocessing.Pool(processes=args.cpus)
+gene_dicts = pool.map(lineage_fastas, gene_dicts)
+pool.close()
+pool.join()
+
+# Sort recombination events from failed genes.
 for gene_dict in gene_dicts:
-    if isinstance(gene_dict, dict):
-        for pair in gene_dict:
+    if isinstance(gene_dict, list):
+        external += gene_dict[1]
+        gene_dict = gene_dict[0]
+        for key in gene_dict:
             valid = 1
-            # Ignores direction of recombination events when True
             if args.pairs:
-                for iteration in itertools.permutations(pair.split(":"), len(pair.split(":"))):
+                for iteration in itertools.permutations(key.split(":"), len(key.split(":"))):
                     if ":".join(iteration) in final_rec_events:
                         valid = 0
-                        for data in gene_dict[pair]:
-                            final_rec_events[":".join(iteration)].append(data)
+                        final_rec_events[":".join(iteration)].append(gene_dict[key])
                         break
 
             if valid == 1:
-                print(gene_dict[pair])
-                final_rec_events.setdefault(pair, [])
-                for data in gene_dict[pair]:
-                    final_rec_events[pair].append(data)
-                recomb_proportions.setdefault(pair.split(":")[1], 0) # Add recombination fragment size to recipient in dictionary
-                recomb_proportions[pair.split(":")[1]] += int(gene_dict[pair][0][1]) 
-
+                final_rec_events.setdefault(key, [])
+                recomb_proportions.setdefault(key.split(":")[1], 0) # Add recombination fragment size to recipient in dictionary
+                final_rec_events[key].append(gene_dict[key])
+                recomb_proportions[key.split(":")[1]] += int(gene_dict[key][1])
     else:
         bad_genes.append(gene_dict)
 
@@ -626,5 +606,9 @@ with open("{0}/HERO_recombination_proportions.txt".format(args.output), "w") as 
     for genome in recomb_proportions:
         output.write("{0}\t{1}\n".format(genome, recomb_proportions[genome]))
 
+Bio.SeqIO.write(external, "{0}/HERO_external_recomb_fragments.fa".format(args.output), "fasta")
+
 # Write out runtime
 print("Finished in {0}".format(time.time() - t0), flush=True)
+
+
