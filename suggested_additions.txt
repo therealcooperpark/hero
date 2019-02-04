@@ -1,3 +1,0 @@
-Add "Directory maker" function for making HERO output directory
-Add gene recombination frequency calculations like the donor/recipient ones
-Add itol file maker for Frequent Donor/Frequent Recipient markers
