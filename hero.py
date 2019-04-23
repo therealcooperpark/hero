@@ -37,7 +37,7 @@ parser.add_argument("--population", metavar = '', default = 0, type = int, help 
 parser.add_argument("--cleanup", action = "store_false", help = "Keep intermediate files.")
 parser.add_argument("--cpus", metavar = '', default = 1, type = int, help = "Number of threads to use. [1]")
 parser.add_argument("--format", metavar = '', default = "png", help = "Output bar graph file formats [png]")
-parser.add_argument("--highway", default = "#0000FF", help = "Hexadecimal code for highway color in output file")
+parser.add_argument("--highway", metavar = '', default = "#0000FF", help = "Hexadecimal code for highway color in output file [#0000FF]")
 parser.add_argument("--nohighway", metavar = '', default = "#D3D3D3", help = "Hexadecimal code for non-highway color in output file [#D3D3D3]")
 parser.add_argument("--output", metavar = '', default = "HERO", help = "Output directory for HERO files")
 args = parser.parse_args()
@@ -581,7 +581,7 @@ def itol_out(recomb_dict, label, one_stdev_higher):
             # Set Data for branches
             itol.write("DATA\n")
             for pair in file:
-                itol.write("{0},{1},15,{2}\n".format(file[pair][0], file[pair][1], file[pair][3]))
+                itol.write("{0},{1},15,{2},normal\n".format(file[pair][0], file[pair][1], file[pair][3]))
 
 
 def gene_out(gene_file, recomb_genes):
