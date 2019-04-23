@@ -23,6 +23,7 @@ It also includes **sidekick.py** which can be used to run fastGEAR on each indiv
 
 ## INSTALLATION
 HERO has the following dependencies:
+- Python3
 - NCBI-blast+
 - fastGEAR
 
@@ -39,19 +40,32 @@ Optional Dependencies:
 ```
 usage: hero.py [options] fastgear
 
+HERO - Highways Elucidated by Recombination Observations
+
 positional arguments:
-  fastgear      Directory containing all fastGEAR runs for the population
+  fastgear         Directory containing all fastGEAR runs for the population
 
 optional arguments:
-  -h, --help    show this help message and exit
-  --log         Minimum log(BF) length to accept recombination event. [0]
-  --length      Minimum fragment length for recombined sequence. [2]
-  --pairs       Ignore direction of event when calculating recombination
-                highways.
-  --cleanup     Keep intermediate files.
-  --cpus        Number of threads to use. [1]
-  --nohighway   Hexadecimal code for non-highway color in output file
-                [#D3D3D3]
+  -h, --help       show this help message and exit
+  --log            Minimum log(BF) length to accept recombination event. [0]
+  --length         Minimum fragment length for recombined sequence. [2]
+  --pairs          Ignore direction of event when calculating recombination
+                   highways.
+  --filter FILTER  Comma delimited list of strains and filtering categories.
+                   Will match events within a category, and between
+  --inter          Do not add inter-group events to box-plots when using
+                   --filter [False]
+  --population     Manually set size of population for statistical tests in
+                   donor/recipient calculations, defaults to number of
+                   recombining pairs
+  --cleanup        Keep intermediate files.
+  --cpus           Number of threads to use. [1]
+  --format         Output bar graph file formats [png]
+  --highway        Hexadecimal code for highway color in output file [#0000FF]
+  --nohighway      Hexadecimal code for non-highway color in output file
+                   [#D3D3D3]
+  --output         Output directory for HERO files
+
 ```
 
 ### sidekick.py
@@ -90,7 +104,7 @@ iToL formatted file of non-highway recombination events to be dragged into popul
 
 
 ## QUESTIONS
-Feel free to email questions or concerns to therealcooperpark@gmail.com
+Feel free to email questions, concerns and scathing reviews to therealcooperpark@gmail.com
 
 ## CITATION
 If you use this program, please cite:
