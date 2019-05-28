@@ -148,7 +148,7 @@ Raw data for recombined_portions.png
 
 
 ## QUESTIONS
-Feel free to email questions, concerns and scathing reviews to therealcooperpark@gmail.com
+Feel free to email questions, concerns, suggestions and scathing reviews to cjp1043@wildcats.unh.edu
 
 ## CITATION
 If you use this program, please cite:
