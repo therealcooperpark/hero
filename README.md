@@ -96,53 +96,53 @@ optional arguments:
 
 ## OUTPUT
 
-- Discriminant_Highways_hero_itol.txt / Discriminant_Recombination_hero_itol.txt ("Indiscriminant" if using --pairs)
+- **Discriminant_Highways_hero_itol.txt / Discriminant_Recombination_hero_itol.txt ("Indiscriminant" if using --pairs)**
 
 Visualization files for iToL.
 
-- donations.png / recipients.png
+- **donations.png / recipients.png**
 
 Bar graphs showing donation/receipt counts for each genome.
 
-- donor_frequency.txt / recipient_frequency.txt
+- **donor_frequency.txt / recipient_frequency.txt**
 
 Tab-delimited files showing raw data from .png files above
 
-- external_recomb_fragments.fa
+- **external_recomb_fragments.fa**
 
 FASTA format of all recombination fragments that originated outside of the population.
 
 Header format: gene_GenomeID:fragment-length
 
-- failed_genes.txt
+- **failed_genes.txt**
 
 List of genes that had an unsuccessful fastGEAR run
 
-- filtered_recombination_events/
+- **filtered_recombination_events/**
 
 A collection of revised output files for each gene showing the donor and recipient pairs and size of recombination fragment for each event
 
-- gene_frequency.txt
+- **gene_frequency.txt**
 
 Tab-delimited file showing number of recombination events in each gene
 
-- hero_statistics.txt
+- **hero_statistics.txt**
 
 Details about number of recombination pairs/events
 
-- recombination_pairs.txt
+- **recombination_pairs.txt**
 
 Number of recombination events between each pair
 
-- recombination_sizes.txt
+- **recombination_sizes.txt**
 
 List of all fragment sizes for every recombination event
 
-- recombined_portions.png
+- **recombined_portions.png**
 
 Graph detailing number of recombined bases in each genome
 
-- recombined_base_pairs.txt
+- **recombined_base_pairs.txt**
 
 Raw data for recombined_portions.png
 
