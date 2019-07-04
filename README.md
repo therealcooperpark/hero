@@ -151,6 +151,5 @@ Raw data for recombined_portions.png
 Feel free to email questions, concerns, suggestions and scathing reviews to cjp1043@wildcats.unh.edu
 
 ## CITATION
-If you use this program, please cite:
-**Place future paper here**
+Park CJ, Andam CP. *Hero* **Github** https://github.com/therealcooperpark/hero
 
