@@ -1,6 +1,9 @@
 # HERO
 **H**ighways **E**numerated by **R**ecombination **O**bservations
 
+**>>Some people have found it exceedingly difficult to download and use this program in its current state. I will update this when I have found time to address these concerns properly. If you'd still like to use this, please email me and I will happily provide 1-on-1 assistance to get this working for you!<<**
+
+
 HERO is a pipeline, written in Python, designed to parse and visualize highways of genome-wide recombination using the output of the recombination detection tool [fastGEAR](https://mostowylab.com/news/fastgear?rq=fastgear). Currently, it works in 3 steps:
 
 1) For each recombination event, we use BLASTN to find the most likely donor across a pool of potential genomes (determined by the clustering alogrithms found in fastGEAR). The most likely donor genome in each event earns a "donor potential" of 1. In the event of a tie, we split the value to each strain equally (probability = 1/#-of-strains). Once "donor potential" from every event is determined, the sum of these constitutes the overall "donating potential" of a genome. We iterate through the remaining events with undetermined donors and award the event to the donor with the highest total "donating potential".
