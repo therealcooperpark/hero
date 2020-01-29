@@ -24,9 +24,13 @@ We also include the supporting script **sidekick.py** which can be used to run f
 
 ## INSTALLATION
 HERO has the following dependencies:
-- Python3
-- NCBI-blast+
-- fastGEAR
+- [NCBI-blast+](https://blast.ncbi.nlm.nih.gov/Blast.cgi?PAGE_TYPE=BlastDocs&DOC_TYPE=Download)
+- [fastGEAR](https://mostowylab.com/news/fastgear)
+- Python 3.5
+	- [Biopython](https://biopython.org/wiki/Download)
+	- [Matplotlib](https://matplotlib.org/)
+	- [Pandas](https://pandas.pydata.org/)
+	- [Plotnine](https://plotnine.readthedocs.io/en/stable/)
 
 Optional Dependencies:
 - Roary
