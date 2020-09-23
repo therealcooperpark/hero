@@ -1,6 +1,7 @@
 # HERO
 **H**ighways **E**numerated by **R**ecombination **O**bservations
 
+**HERO WILL BE RECEIVING A 2.0 UPDATE VERY SOON TO ADDRESS INSTALLATION ISSUES AND IMPROVED VISUALS/STATISTICAL MEASUREMENTS!**
 
 HERO is a pipeline, written in Python, designed to parse and visualize highways of genome-wide recombination using the output of the recombination detection tool [fastGEAR](https://mostowylab.com/news/fastgear?rq=fastgear). Currently, it works in 3 steps:
 
