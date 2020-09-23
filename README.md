@@ -1,7 +1,7 @@
 # HERO
 **H**ighways **E**numerated by **R**ecombination **O**bservations
 
-HERO is a pipeline, written in Python, designed to parse and visualize highways of genome-wide homologous recombination between user-defined metadata groups using the output of the recombination detection tool [fastGEAR](https://pubmed.ncbi.nlm.nih.gov/28199698/). Currently, it works in X stages:
+HERO is a pipeline, written in Python, designed to parse and visualize highways of genome-wide homologous recombination between user-defined metadata groups using the output of the recombination detection tool [fastGEAR](https://pubmed.ncbi.nlm.nih.gov/28199698/). Currently, it works in 3 stages:
 
 1) For each recombination event, HERO comapres the sequence similarity between the recombined DNA sequence and a pool of potential donor genomes (determined by the clustering algorithm found in fastGEAR) to identify the most likely donor metadata-group (defined by the user).
 
