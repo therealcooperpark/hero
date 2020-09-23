@@ -1,809 +1,617 @@
 #! /usr/bin/env python3
+''' Early HERO draft - Testing the values that return from a fastGEAR run
+    given the parameters for "good" recombination '''
 
-'''
-HERO: Highway Enumeration from Recombination Observations
-'''
-
-
-import warnings
-warnings.filterwarnings('ignore')
-import argparse
-import Bio.SeqIO
-import itertools
+from argparse import ArgumentParser
+from Bio.SeqIO import parse as BioParse
+from itertools import product
 import math
 import multiprocessing
-from operator import itemgetter
 import os
 import pandas
-from plotnine import *
-import random
-import shutil
-import statistics
-import string
+from random import randint
 import subprocess
 import time
 
-t0 = time.time()
+## Custom modules
+#from circos_hero import *
 
-# Args
-parser = argparse.ArgumentParser(description = "HERO - Highways Elucidated by Recombination Observations", usage = "hero.py [options] fastgear")
-parser.add_argument("fastgear", help = "Directory containing all fastGEAR runs for the population")
-parser.add_argument("--log", metavar = '', default = 0, type = int, help = "Minimum log(BF) length to accept recombination event. [0]")
-parser.add_argument("--length", metavar = '', default = 2, type = int, help = "Minimum fragment length for recombined sequence. [2]")
-parser.add_argument("--pairs", action = "store_true", help = "Ignore direction of event when calculating recombination highways.")
-parser.add_argument("--filter", help = "Comma delimited list of strains and filtering categories. Will match events within a category, and between")
-parser.add_argument("--inter", action = "store_true", help = "Do not add inter-group events to box-plots when using --filter [False]")
-parser.add_argument("--population", metavar = '', default = 0, type = int, help = "Manually set size of population for statistical tests in donor/recipient calculations, defaults to number of recombining strains")
-parser.add_argument("--cleanup", action = "store_false", help = "Keep intermediate files.")
-parser.add_argument("--cpus", metavar = '', default = 1, type = int, help = "Number of threads to use. [1]")
-parser.add_argument("--format", metavar = '', default = "png", help = "Output bar graph file formats [png]")
-parser.add_argument("--highway", metavar = '', default = "#0000FF", help = "Hexadecimal code for highway color in output file [#0000FF]")
-parser.add_argument("--nohighway", metavar = '', default = "#D3D3D3", help = "Hexadecimal code for non-highway color in output file [#D3D3D3]")
-parser.add_argument("--output", metavar = '', default = "HERO", help = "Output directory for HERO files")
-args = parser.parse_args()
+start_time = time.time()
+
+def get_args():
+    parser = ArgumentParser(description='HERO - Highways Elucidated by Recombination Observations',
+                            usage='hero.py --hero_table [table] --groups [groups_file] [options]')
+    parser.add_argument('--hero_table', required=True, help='HERO input table')
+    parser.add_argument('--groups', required=True, help='Tab-deliminated file with genomes in 1st column and groups in 2nd')
+    parser.add_argument('-o', '--outdir', default='hero_results', type=str, help='Output directory [hero_results]')
+    parser.add_argument('-c', '--cpus', default=1, type=int, help='CPUs to use [1]')
+    parser.add_argument('-l', '--length', default=0, type=int, help='Minimum length required to process recomb event [0]')
+    parser.add_argument('-b', '--bayes', default=10, type=float, help='Minimum bayes factor required to process recomb event [10]')
+
+    return parser.parse_args()
 
 
-def make_directory(name):
-    # Make output directory for core genome alignments, rename if already in use
+def parse_metadata(metadata_file):
+    ''' Parse metadata into a dictionary '''
+
+    groups = {} # Key = Genome [1st column], Value = Group [2nd column]
     try:
-        os.mkdir(name)
-        out = name
-    except FileExistsError:
-        ext = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
-        out = name + '_' + ext
-        os.mkdir(out)
-        print("Output directory already found, writing to {0}".format(out), flush=True)
+        with open(metadata_file, 'r') as metafile:
+            for line in metafile:
+                line = line.strip().split()
+                groups[line[0]] = line[1]
+    except FileNotFoundError:
+        print('Groups file {0} could not be opened. Ensure filepath is correct'.format(metadata_file))
+        exit(1)
+    return groups
 
-    return out
 
-def lineage_fastas(fastgear):
-    # Check absolute vs relative path for appropriate pathways to gene fastGEARs
-    if not fastgear.is_dir:
-        print("Non-fastGEAR directory found. Skipping", flush=True)
-        return fastgear.name
+def parse_table(hero_table):
+    ''' 
+    Parse HERO table into list of arguments 
+    Sanity check all paths
+    '''
 
-    try:
-        with open("{0}/output/recombinations_recent.txt".format(fastgear.path), "r") as file:
-            if len(file.readlines()) < 3:
-                return fastgear.name
-    except IOError:
-        return fastgear.name
+    genes = []
+    with open(hero_table, 'r') as infile:
+        for line in infile:
+            line = line.strip().split()
+            if os.path.exists(line[1]) and os.path.exists(line[2]):
+                genes.append(line)
+            else:
+                print('Gene {0} has a bad filepath. Skipping.'.format(line[0]), flush = True)
+    return genes
 
-    # Setup main collections
-    class Strains:
-        alignment_length = 0 # Total alignment length will be set with each new gene processed
 
-        def __init__(self, lineage, name):
+def unpack_arguments(arg_list):
+    ''' Unpack arguments and parse recombination '''
+
+    return parse_fastgear(arg_list[0], arg_list[1], arg_list[2])
+
+
+def parse_fastgear(gene_name, fasta_path, fastgear_path):
+    t0 = time.time()
+
+    ''' Parse recent recombination events from fastgear run '''
+
+    # Find FASTA file to parse sequence info
+    if not any(BioParse(fasta_path, 'fasta')):
+        print('{0} fasta file is bad. Removing from analysis.'.format(gene_name), flush=True)
+        return gene_name
+   
+    # Parse FASTA file into dict
+    seqs_dict = {}
+    for record in BioParse(fasta_path, 'fasta'):
+        seqs_dict[record.id] = record.seq
+
+    # Setup genome class
+    class Genome:
+        strain_to_genome = {} # Key: Strain name, Value: Genome class ID
+        lineages = {} # Key: Lineage, Value: Strain name
+
+        def __init__(self, sequence, lineage, name):
             self.name = name
             self.lineage = lineage
-            self.fasta = ""
-            self.trim = 0
-            self.unaligned_fasta = ""
+            self.sequence = sequence
+
+            # Update class dictionaries
+            Genome.lineages.setdefault(lineage, [])
+            Genome.lineages[lineage].append(name)
+            Genome.strain_to_genome[name] = self
 
 
-            lineages.setdefault(lineage, [])
-            query_lineages.setdefault(lineage, [])
-            lineages[lineage].append(name)
+    # Parse lineage file and update Genome Class Dicts
+    try:
+        with open('{0}/output/lineage_information.txt'.format(fastgear_path), 'r') as fg_file:
+            next(fg_file)
+            for line in fg_file:
+                line = line.strip().split()
+                try:
+                    seq = seqs_dict[line[3]]
+                except KeyError:
+                    print('{0} could not match a sequence to ID {1}. Removing from analysis.'.format(fastgear_path, line[3]), flush=True)
+                    return gene_name
+                
+                # Add genome to Genome class
+                Genome(seq, line[1], line[3])
+
+    except FileNotFoundError:
+        return gene_name
+
+    # Parse recombination
+    return parse_recombination(fastgear_path, Genome, gene_name)
 
 
+def parse_recombination(fastgear_run, Genome, gene_name):
+    ''' Parse recent recombination and filter events '''
 
-    lineages = {} # Sort IDs into lineage
-    fg_strains = {} # Collection of all strains in class Strains.
-    query_lineages = {} # Sequences for query of blast, sorted by lineage
-    # Parse and sort strain alignments by lineage, build blast DB for each file
+    def add_event(d_lineage, s_idx, e_idx, recipient):
+        ''' Update pair with new event and condense overlapping events '''
+
+        # Make sure pair exists
+        pair = d_lineage
+        donor_lineages.setdefault(pair, [])
+
+        # Append new index to list of events
+        donor_lineages[pair].append([s_idx, e_idx, [recipient]])
+
+        # Then condense events by index pairs
+        donor_lineages[pair].sort(key = lambda x: x[0])
+
+        merged_pairs = [] # final array to hold merged intervals
+        merged_recipients = []
+        start = -1
+        end = -1
+        for idx in range(len(donor_lineages[pair])):
+            cur_event = donor_lineages[pair][idx]
+            if cur_event[0] > end:
+                if idx != 0:
+                    merged_pairs.append([start, end, merged_recipients])
+                    merged_recipients = []
+                end = cur_event[1]
+                start = cur_event[0]
+                merged_recipients.extend(cur_event[2])
+            elif cur_event[1] >= end:
+                end = cur_event[1]
+                merged_recipients.extend(cur_event[2])
+            
+        if end != -1 and [start,end] not in merged_pairs:
+           merged_pairs.append([start, end, merged_recipients])
+
+        donor_lineages[pair] = merged_pairs 
+
+
+    # Open recent recomb file
+    try:
+        recomb_file = open('{0}/output/recombinations_recent.txt'.format(fastgear_run), 'r')
+        next(recomb_file)
+        next(recomb_file)
+    except FileNotFoundError:
+        print('{0} has an incomplete fastgear run. Removing from analysis.'.format(fastgear_run), flush=True)
+        return gene_name
+
+    # Find external donor lineage num for gene for filtering
+    external_donor = str(max([int(x) for x in Genome.lineages]) + 1)
+    # Logs all lineage pairs and tracks unique events
+    donor_lineages = {} # Key:   donor lineage
+                        # Value: List of unique events
+
+    # Get event info
+    for line in recomb_file:
+        line = line.strip().split()
+        s_idx, e_idx = int(line[0])-1, int(line[1]) # fastGEAR includes s_idx in the sequence, so subtract one for indexing
+        d_lineage, strain_name = line[2], line[5]
+        logbf = float(line[4])
+
+        # If minimum length or bayes not met, move on (length/bayes are global vars)
+        # If donor lineage is external donor, move on
+        fragment_len = e_idx - s_idx # fastGEAR includes the start position in its len
+        if fragment_len < length or (math.e**logbf) < bayes or d_lineage == external_donor:
+            continue
+
+        # Add event to lineage pair in dict
+        add_event(d_lineage, s_idx, e_idx, strain_name)
+    recomb_file.close() # Close recomb file
+
+    # For each unique event, find the most likely donor(s).
+    # Then for each unique metadata group in recipients, log an event
+    events = set() # All recombination events
+
+    for d_lineage in donor_lineages:
+        for event in donor_lineages[d_lineage]:
+            start, end = int(event[0]), int(event[1])
+            sample_recipient = event[2][0]
+            # All genome are expected to be roughly equal. So take the first genome
+            recip_seq = Genome.strain_to_genome[sample_recipient].sequence[start:end]
+            donor_group = find_pair(start, end, d_lineage, recip_seq, Genome)
+
+            # Fit donor group to all unique recip groups
+            if donor_group:
+                for recipient in event[2]:
+                    recip_group = metadata[recipient]
+                    recip_strains = [strain for strain in event[2] if metadata[strain] == recip_group]
+                    final_info = (donor_group, recip_group, end-start, gene_name, ','.join(recip_strains))
+                    events.add(final_info)
+
+    return list(events)
+
+
+def find_pair(s_idx, e_idx, d_lineage, recip_seq, Genome):
+    ''' Try to find a metadata pair that is linked by this recombination event '''
+
+    # Step 1: See if all donors in d_lineage are from same metadata group
+    #         NOTE:Lots of checking metadata groups here.
+    #         I always default to other in case genome wasn't established in
+    #         metadata parsing.
+    
+    # Test donors for total consistency
+    donors = Genome.lineages[d_lineage]
+    metadata.setdefault(donors[0], 'other')
+    metagroup = metadata[donors[0]] # metadata dict is a global var
+
+    for donor in donors[1:]:
+        metadata.setdefault(donor, 'other')
+        cur_group = metadata[donor]
+        if cur_group != metagroup: # Not all donors are the same
+            break
+    else: # All donors from same group! We can move on.
+        return metagroup 
+
+    # Step 2: Not all donors fit
+    #         Get distance of recip seq to donor recomb fragments
+    
+    # Get distance of recip seq to all donor seqs
+    shortest = None
+    viable_donors = []
+    for donor in donors:
+        donor_frag = str(Genome.strain_to_genome[donor].sequence[s_idx:e_idx])
+        # Calculate distance between donor and recip fragment
+        dist = 0
+        for idx, nuc in enumerate(donor_frag):
+            if recip_seq[idx] != nuc:
+                dist += 1
+
+        # Compare dist to current best dist
+        if not shortest: # This is the first comparison
+            shortest = dist
+            viable_donors.append(donor)
+            continue
+
+        # All other tests
+        if dist < shortest:
+            shortest = dist
+            viable_donors = [donor]
+        elif dist == shortest:
+            viable_donors.append(donor)
+
+
+    # Step 3 (2b?): If all likely donors from same metagroup, we win.
+    #               Otherwise, discard the event.
+
+    metagroup = metadata[viable_donors[0]]
+    if len(viable_donors) > 1: # If multiple donors, check for consistency
+        for donor in viable_donors[1:]:
+            if metadata[donor] != metagroup:
+                return None # If two metagroups exist, kill the search
+
+    # We found a good metagroup! Send the event back
+    return metagroup
+
+
+def parse_events(recombination_events):
+    ''' Parse events from multithreaded event finding '''
+
+    good_events = []
+    bad_genes = []
+    for gene in recombination_events:
+        if isinstance(gene, list): # Good events are lists, bad genes are str
+            for event in gene:
+                good_events.append(event)
+        else:
+            bad_genes.append(gene)
+    return good_events, bad_genes
+
+
+def calculate_highway(events, unique_groups):
+    '''
+    Calculate the theshold for highways of recombination
+    highway = 3*IQR + Q3
+    IQR = Interquartile range
+    Q3  = Third quartile of the data
+    '''
+
+    recomb_events = {x:0 for x in unique_groups}
+    # Get all unique combinations of group pairs
+    for event in events:
+        pair = (event[0], event[1])
+        recomb_events.setdefault(pair, 0)
+        recomb_events[pair] += 1
+
+    # Calculate IQRs
+    recomb_counts = list(recomb_events.values())
+    recomb_df = pandas.DataFrame({'Events': recomb_counts})
+    q3 = recomb_df.quantile(q=0.75)['Events']
+    q1 = recomb_df.quantile(q=0.25)['Events']
+    IQR = q3 - q1
+    significance_limit = q3 + (3*IQR)
+    return recomb_events, significance_limit
+
+
+class Metagroup:
+    '''
+    Each metadata group will be given an instance.
+    Tracks recombination stats for each group
+    '''
+
+    metagroup_dict = {} # Key:   metagroup string name
+                        # Value: Metagroup object instance
+
+    def __init__(self, name):
+        # Recombination variables
+        self.name        = name
+        self.donations   = 0    # Number of donations
+        self.receipts    = 0    # Number of receipts
+        self.group_stats = {}   # Key:   Other metagroup object string name
+                                # Value: [donations_to, receipts_from]
+
+        # Plotting variables
+        self.d_pos       = 0    # Number of donations already plotted
+        self.r_pos       = 0    # Number of receipts already plotted
+
+    def total_events(self):
+        return self.donations + self.receipts
+
+    def add_event(event):
+        '''
+        Parse event to add donor and recipt credit
+        to each metagroup in event
+        '''
+
+        donor, recipient = event[0], event[1]
+
+        # Make object instance for each group if not already exists
+        Metagroup.metagroup_dict.setdefault(donor, Metagroup(donor))
+        Metagroup.metagroup_dict.setdefault(recipient, Metagroup(recipient))
+
+        # Add donor/recipient credit to each group
+        d_group = Metagroup.metagroup_dict[donor]
+        r_group = Metagroup.metagroup_dict[recipient]
+        d_group.donations += 1
+        r_group.receipts  += 1
+        d_group.group_stats.setdefault(recipient, [0, 0])
+        r_group.group_stats.setdefault(donor, [0, 0])
+        d_group.group_stats[recipient][0] += 1 # Add donor credit
+        r_group.group_stats[donor][1] += 1     # Add recip credit
+
+
+def make_circos(events, outdir):
+    ''' Write circos files given events and list of genomes w/ metadata '''
+
+    # Log all events in Metagroup class
+    for event in events:
+        Metagroup.add_event(event)
+
+    # Write karyotype file for circos
+    with open('{0}/circos_karyotype.txt'.format(outdir), 'w') as k_file:
+        # Get random color for each group chunk
+        rand_colors = random_colors(len(Metagroup.metagroup_dict.keys()))
+        # Write color and group to karyotype file
+        for idx, group in enumerate(Metagroup.metagroup_dict.values()):
+            color = rand_colors[idx]
+            k_file.write('chr - {0} {0} 0 {1} {0}\n'.format(group.name, group.total_events()))
+
+    # Write link file
+    with open('{0}/circos_links.txt'.format(outdir), 'w') as l_file:
+        # Create links by the donor
+        for d_group in Metagroup.metagroup_dict.values():
+            donor = d_group.name
+
+            # Get recipient from group_stats variable
+            # If donor is in the list of recipients,
+              # Put it on the end so it looks cleaner
+            recipients = list(d_group.group_stats.keys())
+            recipients.sort(key=donor.__eq__)
+            for recipient in d_group.group_stats:
+                donations = d_group.group_stats[recipient][0]
+                r_group = Metagroup.metagroup_dict[recipient]
+
+                ## Write link to file
+                # Get donor plot range and update donor positions
+                d_start = d_group.d_pos
+                d_end   = d_start + donations
+                d_group.d_pos += donations
+
+                # Get recipient range and update recipient positions
+                # All receipts should be plotted away from donations
+                r_start = r_group.donations + r_group.r_pos
+                r_end   = r_start + donations
+                r_group.r_pos += donations
+
+                # Write to file
+                link  = donor + ' ' + str(d_start) + ' ' + str(d_end) + ' '
+                link += recipient + ' ' + str(r_start) + ' ' + str(r_end) + '\n'
+                l_file.write(link)
+
+    # Write config_file
+    # Tutorial to understanding circos config file can be found at:
+    # circos.ca/documentation/tutorials/quick_start/
+    with open('{0}/circos.conf'.format(outdir), 'w') as c_file:
+
+        file_contents  = 'karyotype = {0}/circos_karyotype.txt\n'.format(outdir)
+
+        # Global color scheme
+        file_contents += '# Global color scheme\n'
+        file_contents += '<colors>\n'
+        for idx, name in enumerate(Metagroup.metagroup_dict.keys()):
+            file_contents += '{0}* = {1}\n'.format(name, rand_colors[idx])
+        file_contents += '</colors>\n'
+
+        # Basic required content (karyotype file location, ideogram creation)
+        file_contents += '<ideogram>\n\n<spacing>\n'
+        file_contents += 'default = 0.005r # Spacing between out ring chunks\n'
+        file_contents += '</spacing>\n\n'
+
+        # Ideogram layout details
+        file_contents += '# Ideogram layout details\n'
+        file_contents += 'radius            = 0.9r # Size of radius for outer ring\n'
+        file_contents += 'thickness         = 80p # Thickness of outer ring\n'
+        file_contents += 'fill              = yes # Fill chunks with color?\n'
+        file_contents += 'stroke_color      = dgrey # Color of chunk outline\n'
+        file_contents += 'stroke_thickness  = 2p # Thickness of outline\n\n'
+
+        # Ideogram label details
+        file_contents += '# Ideogram label details\n'
+        file_contents += 'show_label     = yes      # Show chunk labels?\n'
+        file_contents += 'label_font     = default  # Font of the labels\n'
+        file_contents += 'label_radius   = 1r + 75p # Where to place labels\n'
+        file_contents += 'label_size     = 50       # Size of the label\n'
+        file_contents += 'label_parallel = yes      # Set label parallel to chunks\n'
+        file_contents += '</ideogram>\n\n'
+
+        # Tick details
+        # << SKIPPED FOR NOW >>
+
+        # Link details
+        file_contents += '# Links... The actual connections\n'
+        file_contents += '<links>\n<link>\n'
+        file_contents += 'file          = {0}/circos_links.txt # The file with links to draw\n'.format(outdir)
+        file_contents += 'ribbon        = yes              # Turn links into fancy ribbons\n'
+        file_contents += 'flat          = yes              # Flatten ribbons\n'
+        file_contents += 'z             = 1                # importance for ribbon plotting\n'
+        file_contents += 'radius1       = 0.8r             # Push donor end of ribbon inward\n'
+        file_contents += 'color         = eval(var(chr2))  # Default link color\n'
+        file_contents += 'radius        = 0.98r            # Where links will stop at\n'
+        file_contents += 'bezier_radius = 0.1r             # How far from center the curves are drawn\n'
+        file_contents += 'thickness     = 5                # Default thickness\n'
+
+        # Establish rule to color links by donor chunk
+        file_contents += '\n<rules>\n'
+        file_contents += '\nflow = continue\n\n'
+        file_contents += '<rule>\n'
+        file_contents += 'condition = 1\n'
+        file_contents += 'color     = eval(var(chr1))\n'
+        file_contents += '</rule>\n<rule>\n'
+        file_contents += 'condition = var(interchr)\n'
+        file_contents += 'z         = 2\n'
+        file_contents += '</rule>\n'
+        file_contents += '</rules>\n\n'
+        file_contents += '</link>\n</links>\n\n'
+
+        # Default circos distributions to include
+        file_contents += '# Default circos distributions to include\n'
+        file_contents += '<image>\n<<include etc/image.conf>>\n</image>\n'
+        file_contents += '<<include etc/colors_fonts_patterns.conf>>\n'
+        file_contents += '<<include etc/housekeeping.conf>>\n'
+
+        c_file.write(file_contents)
+
+
+def make_highway_circos(highway, outdir):
+    '''
+    Create 2nd circos.conf file which filters the color
+    of ribbons below the highway_definition threshold
+    '''
 
     try:
-        with open("{0}/output/lineage_information.txt".format(fastgear.path), "r") as file:
-            next(file)
-            for line in file:
-                line = line.split()
-                fg_strains[line[3]] = Strains(line[1], line[3])
-    except FileNotFoundError:
-        print("Gene {0} has an unsuccessful fastGEAR run. Skipping for results.".format(fastgear.name), flush=True)
-        return fastgear.name
-
-    # Identify alignment file
-    alignment = ""
-    for file in os.scandir(fastgear.path):
-        if file.is_file() and ".mat" not in file.name:
-            try:
-                if any(Bio.SeqIO.parse(file.path, "fasta")):
-                    alignment = file.path
-            except UnicodeDecodeError:
-                pass
-    if alignment == "":
-        print("Gene {0} has no alignment file present. Skipping for results.".format(fastgear.name), flush=True)
-        return fastgear.name
-
-    # Generate lineage based fasta files
-    for record in Bio.SeqIO.parse(alignment, "fasta"):
-        fg_strains[record.id].fasta = record
-        fg_strains[record.id].unaligned_fasta = record
-        fg_strains[record.id].unaligned_fasta.seq = unalignment(fg_strains[record.id].fasta.seq)
-
-    # Write out reference lineage files
-    os.mkdir("{0}/blast_files/{1}".format(args.output, fastgear.name))
-    for num in lineages:
-        records = []
-        for strain in lineages[num]:
-            records.append(fg_strains[strain].unaligned_fasta)
-
-        Bio.SeqIO.write(records, "{0}/blast_files/{1}/lineage_{2}.fa".format(args.output, fastgear.name, num), "fasta")
-    
-        blastdb = subprocess.run("makeblastdb -in {0}/blast_files/{1}/lineage_{2}.fa -dbtype nucl".format(args.output, fastgear.name, num), shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-        if blastdb.stderr:
-            print(blastdb.stderr.decode('ascii'), flush=True)
-            print("Revisit the gene alignment of {0} to troubleshoot. Skipping for results.".format(fastgear.name), flush=True)
-            return fastgear.name
-
-    return recomb_parser(fastgear, Strains, fg_strains, query_lineages, max(lineages.keys()))
+        with open('{0}/circos.conf'.format(outdir), 'r') as circos_file, open('{0}/highway_circos.conf'.format(outdir), 'w') as outfile:
+            for line in circos_file:
+                if line == '</rules>\n':
+                    outfile.write('<rule>\n')
+                    outfile.write('condition = (var(end1) - var(start1)) < {0}\n'.format(highway))
+                    outfile.write('color     = grey\n')
+                    outfile.write('z         = 1\n')
+                    outfile.write('</rule>\n')
+                outfile.write(line)
+    except IOError:
+        print('Could not make highway circos file. Check circos.conf', flush=True)
 
 
-def recomb_parser(fastgear, Strains, fg_strains, query_lineages, max_lineage):
-    # Parse recombination events and build query blast files
-    external = []
-    overlap_check = {}
-    overlap_removes = {}
-    with open("{0}/output/recombinations_recent.txt".format(fastgear.path), "r") as recomb_file:
-        next(recomb_file)
-        next(recomb_file)
+def random_colors(num_colors):
+    ''' Generate num_colors random colors '''
+    # Current optimum maximum number of groups: 51 (255//5)
 
-        # Check for base pair overlap in recipients from the same donor lineage
-        skip_lines = set()
-        line_num = 0
-        possible_lines = {}
-        for line in recomb_file:
-            line = line.split()
-            possible_lines.setdefault(line[2], [])
-
-            # Find overlap
-            for pos, idx in enumerate(possible_lines[line[2]]):
-                new_idx = seq_overlap(int(idx[0]), int(idx[1]), int(line[0]), int(line[1]))
-                if new_idx:
-                    possible_lines[line[2]][pos] = new_idx
+    colors = {k:[] for k in 'rgb'} # Dict of all R/G/B values
+    for color in range(num_colors): # Make each color
+        temp = {k: randint(0,255) for k in 'rgb'} # Get random RBG values
+        for k in temp:
+            # For each value, make sure it is at least 25 points
+            # different from all other values in same position
+            while True:
+                c = temp[k]
+                t = set(j for j in range(c-5, c+5) if 0 <= j <= 255)
+                if t.intersection(colors[k]):
+                    temp[k] = randint(0,255)
+                else:
                     break
-            else:
-                possible_lines[line[2]].append((line[0], line[1]))
-            line_num += 1
-
-        # Identify overlap within the same recipient
-        recomb_file.seek(0,0)
-        next(recomb_file)
-        next(recomb_file)
-        line_num = 0
-        for line in recomb_file:
-            line = line.split()
-            
-            if float(line[4]) < args.log or line_num in skip_lines:
-                continue
-            line_num += 1
-            donor, recipient, start_idx, end_idx  = line[2], fg_strains[line[5]], int(line[0]) - 1, int(line[1]) - 1
-            # Start dictionary for donor lineage and recipient
-            overlap_check.setdefault(donor, {})
-            overlap_check[donor].setdefault(recipient, [])
-            # Check for overlap event in each index
-            for pos,pair in enumerate(list(overlap_check[donor][recipient])):
-                new_idx = seq_overlap(start_idx, end_idx, pair[0], pair[1])
-                if new_idx != 0: # If overlap, mark index of replacement
-                    overlap_removes[donor][recipient][pos] = new_idx
-                    break
-            else: # Replace old index if overlap, otherwise add index as source for next
-                overlap_check[donor][recipient].append((start_idx, end_idx))
-
-    # For each unique recombination fragment, pull sequence, verify length meets minimum and set Bio.SeqIO record for event. Add this to query_lineages for blasting
-    for donor in overlap_check:
-        for recipient in overlap_check[donor]:
-            for fragment in overlap_check[donor][recipient]:
-                sequence = unalignment(recipient.fasta.seq[fragment[0]:fragment[1]])
-                if len(sequence) <= args.length:
-                    continue
-                identity = "{0}:{1}".format(recipient.name, len(sequence)) # Recipient name and length of event
-
-                if int(donor) > int(max_lineage): # Add event to external recombination or within population recombination
-                    rec = Bio.SeqRecord.SeqRecord(id = "{0}_{1}".format(fastgear.name, identity), seq = sequence)
-                    external.append(rec)
-                else:
-                    rec = Bio.SeqRecord.SeqRecord(id = identity, seq = sequence)
-                    query_lineages[donor].append(rec)
-
-    rec_indexes = {}
-    recombination_events = []
-    for query in query_lineages:
-        filename = "{0}/blast_files/{1}/lineage_{2}_query.fa".format(args.output, fastgear.name, query)
-        Bio.SeqIO.write(query_lineages[query], filename, "fasta")
-        blast_output = subprocess.run("blastn -query {0} -subject {1}/blast_files/{2}/lineage_{3}.fa -evalue 1e-5 -outfmt 7 -max_hsps 1".format(filename, args.output, fastgear.name, query),\
-            shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
-
-        if not args.cleanup: # Keeps blast output in the event of keeping intermediate files
-            blast_file = open("{0}/blast_files/{1}/query_{2}.blast_output".format(args.output, fastgear.name, query), "w")
-
-        # Parse blast_output
-        for entry in blast_output.stdout.decode('ascii').split("\n"):
-
-            if not args.cleanup:
-                blast_file.write("{0}\n".format(entry))
-
-            if "#" in entry: # Skip headers, but recognize that a new event is being processed
-                potential_donors = []
-                get_event, e_value, percent_identity  = 1, None, None
-                continue
-
-            if entry == "" or get_event == 0: # Checks for empty string (due to parsing) and if match has been found already
-                continue
-
-            entry = entry.split()
-            
-            if not e_value: # If first donor in list, add to list and move on
-                e_value = entry[10]
-                percent_identity = entry[2]
-                potential_donors.append(entry[1])
-            elif e_value == entry[10] and percent_identity == entry[2]: # Otherwise, check quality of next donor until they do not match
-                potential_donors.append(entry[1])
-            else: # When they don't match, use that list of potential donors for the event
-                r = entry[0].split(":")
-                recombination_events.append((fastgear.name, potential_donors, r[0], r[1]))
-                get_event = 0                
-
-        if not args.cleanup:
-            blast_file.close()
-
-    return [recombination_events, external]
-
-def unalignment(seq):
-    # Remove gap characters from sequence alignment
-    new_seq = ""
-    for nuc in seq:
-        if nuc != "-":
-            new_seq += nuc
-    return Bio.Seq.Seq(new_seq)
-
-
-def seq_overlap(start, end, a, b):
-    # Check for overlap
-    if a <= start and b >= start:
-        if b > end:
-            return (a,b)
-        else:
-            return (a,end)
-    elif a >= start and a <= end:
-        if b > end:
-            return (start,b)
-        else:
-            return (start,end)
-    else:
-        overlap = 0
-    
-    return overlap
-    
-
-def cleanup(fastgear):
-    # Clean intermediate files
-    for file in os.scandir(fastgear.path):
-        if "lineage" in file.name:
-            os.remove(file.path)
-
-
-def write_out_events(unique_recombination):
-    # Write out predicted events as new fastGEAR styled files
-
-    # Sort events by gene
-    gene_sorted_dict = {}
-    for pair in unique_recombination:
-        p2 = pair.split(":")
-        for event in unique_recombination[pair]:
-            gene_sorted_dict.setdefault(event[1], [])
-            gene_sorted_dict[event[1]].append((p2[0], p2[1], event[0]))
-
-    # Write out events per gene
-    for gene in gene_sorted_dict:
-        with open("{0}/filtered_recombination_events_{1}bp_{2}logBF/{3}_events.txt".format(args.output, args.length, args.log, gene), "w") as output:
-            output.write("Donor\tRecipient\tFragment Length\n")
-            for event in gene_sorted_dict[gene]:
-                output.write("{0}\t{1}\t{2}\n".format(event[0], event[1], event[2]))
-
-
-def find_pairs(good_genes):
-    # Get donor probability and assign pairs of recombination
-
-    ### Output dictionaries
-    unique_recombination = {} # Donor_recipient pairs and their recombination length/gene origin
-    paired_recombination = {} # Donor_recipient pairs without direction
-    recombination_fragments = {}
-
-    ### Function dictionaries
-    donors = {} # Donor probabilities 
-    non_unique_events = [] # All events that have multiple possible donors
-
-    for event in good_genes:
-        if len(event[1]) == 1: # If only one donor, set pair as donor_recipient
-            d,r = event[1][0], event[2]
-            d_r = "{0}:{1}".format(event[1][0], event[2])
-            paired_d_r = find_paired_events([d,r], d_r, paired_recombination)
-
-            donors.setdefault(d, 0) # If there is a single donor, its probability for the event is one.
-            donors[d] += 1
-
-            unique_recombination.setdefault(d_r, [])
-            unique_recombination[d_r].append((event[3], event[0])) # Append tuple of event length and gene source
-
-            paired_recombination.setdefault(paired_d_r, [])
-            paired_recombination[paired_d_r].append((event[3], event[0])) # Do the same for paired keys            
-
-            recombination_fragments.setdefault(r, 0) # Set default for recipient and add fragment length to total bp recombined
-            recombination_fragments[r] += int(event[3])
-            continue
-
-        probability = 1 / len(event[1])
-        for donor in event[1]: # Multiple donors have probabilities added to their total
-            donors.setdefault(donor, 0)
-            donors[donor] += probability
-        non_unique_events.append(event)
-
-    # Sort donors by probability and collect their recombination events high to low
-    prob_sorted_donors = sorted(list(donors.items()), key=lambda x: x[1], reverse = True)
-    ancestral_events = 0
-
-    next_idx = 0
-    for idx, donor in enumerate(prob_sorted_donors):
-        if idx < next_idx: # This will skip iterations when equally_likely donors have been found
-            continue
-
-        equally_likely = set()
-        cur = idx
-        while prob_sorted_donors[cur][1] == donor[1]: # Get all donors with equal likelihood
-            equally_likely.add(donor[0])
-            if cur + 2 > len(prob_sorted_donors): # +1 to counter index offset, +1 to go over list length appropriatelybz
-                break
-            cur += 1
-        next_idx = cur # Push next_idx up to skip any equally likely donors
-
-        for idx, event in enumerate(list(non_unique_events)): # Iterate every dictionary, check if donor present, act accordingly.
-            overlap = equally_likely & set(event[1])
-            if len(overlap) > 1:
-                ancestral_events += 1
-                non_unique_events.remove(event)
-            elif len(overlap) == 1:
-                potential_donor = list(overlap)[0]
-                key = "{0}:{1}".format(potential_donor, event[2])
-                paired_key = find_paired_events(key.split(":"), key, paired_recombination)
-
-                unique_recombination.setdefault(key, [])
-                unique_recombination[key].append((event[3], event[0])) # Append tuple of event length and gene source
-
-                paired_recombination.setdefault(paired_key, [])
-                paired_recombination[paired_key].append((event[3], event[0])) # Do the same for paired keys
-
-                recombination_fragments.setdefault(event[2], 0) # Set default for recipient and add fragment length to total bp recombined
-                recombination_fragments[event[2]] += int(event[3])
-
-                non_unique_events.remove(event)
-    print("{0} Leftover events".format(len(non_unique_events)), flush = True)
-    return (unique_recombination, paired_recombination, recombination_fragments, ancestral_events)
-
-
-def find_paired_events(strains, original_key, paired_recombination):
-    # Find if iteration exists in dict already
-    valid = 1
-    if args.pairs:
-        for iteration in itertools.permutations(strains, 2):
-            if ":".join(iteration) in paired_recombination:
-                paired_key = ":".join(iteration)
-                valid = 0
-                break
-
-    if valid == 1:
-        return original_key
-    else:
-        return paired_key
-
-
-def get_filter_groups():
-    # Make filtering dictionary for strains if user provides it
-    strain_filters = {} # Strain level filtering. Key = strain, value = filter group
-    with open(args.filter, "r") as filter_file:
-        for line in filter_file:
-            line = line.strip().split(",")
-            strain_filters[line[0]] = line[1]
-    return strain_filters
-
-
-def filter_recombination(pairs, strain_filters):
-    # Sort recombination events into user-defined categories
-    filtered_recombination = {"inter": {}}
-
-    for pair in pairs:
-        split = pair.split(":")
-        # Get category, set to "inter" if not found
-        group1, group2 = strain_filters.setdefault(split[0], "inter"), strain_filters.setdefault(split[1], "inter")
-        output_group = group1 if group1 == group2 else "inter"
-
-        # Add to filtered_recombination
-        filtered_recombination.setdefault(output_group, {})
-        filtered_recombination[output_group].setdefault(pair, [])
-        filtered_recombination[output_group][pair] += pairs[pair]
-
-    return filtered_recombination
-
-
-def write_out(group, recombination_dictionary):
-    # Calculate Highway definition
-    if len(group) == 0:
-        print("{0} category has no recombination events. No output files to write".format(label), flush=True)
-        return None
-    # Sort recombination data
-    recomb_nums = {}
-    recomb_sizes = []
-    recomb_genes = {}
-    for pair in recombination_dictionary:
-        recomb_nums.setdefault(pair, 0)
-        for data in recombination_dictionary[pair]:
-            recomb_nums[pair] += 1
-
-            recomb_sizes.append(data[0])
-
-            recomb_genes.setdefault(data[1], 0)
-            recomb_genes[data[1]] += 1
-
-    one_stdev_higher = round((sum(recomb_nums.values()) / len(recomb_nums.values())) + statistics.pstdev(recomb_nums.values()), 2)
-
-    # Write output files
-    names = name_collection(group)
-    ## ^pair_file, stat_file, d_file, r_file, gene_file, size_file
-
-    stats_writer(recomb_nums, names[0], names[1], one_stdev_higher)
-    itol_out(recomb_nums, group, one_stdev_higher)
-    gene_out(names[4], recomb_genes)
-    size_out(names[5], recomb_sizes)
-    if not args.pairs:
-        filtered_stats[group] = frequent_finder(recomb_nums, names[2], names[3])
- 
-
-def name_collection(label):
-    # Assign file names for each output function call
-    if label == "inter":
-        pair_file = "recombination_pairs.txt"
-        stat_file = "hero_statistics.txt"
-        d_file = "donor_frequency.txt"
-        r_file = "recipient_frequency.txt"
-        gene_file = "gene_frequency.txt"
-        size_file = "recombination_sizes.txt"
-    else:
-        pair_file = "{0}_recombination_pairs.txt".format(label)
-        stat_file = "{0}_hero_statistics.txt".format(label)
-        d_file = "{0}_donor_frequency.txt".format(label)
-        r_file = "{0}_recipient_frequency.txt".format(label)
-        gene_file = "{0}_gene_frequency.txt".format(label)
-        size_file = "{0}_recombination_sizes.txt".format(label)
-    return (pair_file, stat_file, d_file, r_file, gene_file, size_file)
-
-
-def stats_writer(recomb_dict, pair_file, stat_file, one_stdev_higher):
-    # Write out recombination pairs and quantities + stats
-    recombination = 0
-    pair_num = 0
-    highway_recomb = 0
-    highway_num = 0
-
-    print("Writing out results to {0}...".format(pair_file), flush=True)
-    with open("{0}/{1}".format(args.output, pair_file), "w") as hero:
-        if args.pairs:
-            hero.write("Pair\tEvents\n")
-        else:
-            hero.write("Donor:Recipient\tEvents\n")
-
-        for event in recomb_dict:
-            recomb_num = int(recomb_dict[event])
-            hero.write("{0}\t{1}\n".format(event, recomb_num))
-
-            recombination += recomb_num
-            pair_num += 1
-            if recomb_num >= one_stdev_higher:
-                highway_recomb += recomb_num
-                highway_num += 1
-
-    with open("{0}/{1}".format(args.output, stat_file), "w") as output:
-        output.write("Total Recombination Events: {0}\n".format(recombination))
-        output.write("Number of recombination pairs: {0}\n".format(pair_num))
-        output.write("Recombination Events in Highways: {0}\n".format(highway_recomb))
-        output.write("Number of Highways: {0}\n".format(highway_num))
-
-
-def itol_out(recomb_dict, label, one_stdev_higher):
-    # Write out highways/recombination in iToL format
-    print("Total number of recombination pairs in {0}: {1}".format(label, len(recomb_dict)), flush=True)
-    print("Writing iToL file...", flush=True)
-    highways = {}
-    non_highways = {}
-    # Sort out highways and prepare for iToL writeout
-    for i in recomb_dict:
-        j = i.split(":")
-        if recomb_dict[i] >= one_stdev_higher:
-            highways[i] = (j[0], j[1], recomb_dict[i], args.highway)
-        else:
-            non_highways[i] = (j[0], j[1], recomb_dict[i], args.nohighway)
-
-    if len(highways) > 0:
-        collection = [highways, non_highways]
-    else:
-        collection = [non_highways]
-        print("No Highways in {0}".format(label), flush=True)
-        # Calculate percentiles for highway coverage
-        # Write out files
-    count = 0
-    for file in collection:
-        if len(collection) > 1 and count == 0:
-            count += 1
-            if args.pairs:
-                if args.filter:
-                    name = "{0}_Indiscriminant_Highways".format(label)
-                else:
-                    name = "Indiscriminant_Highways"
-            else:
-                if args.filter:
-                    name = "{0}_Discriminant_Highways".format(label)
-                else:
-                    name = "Discriminant_Highways"
-            color = args.highway
-            legend_shapes = "1"
-            legend_labels = "Highway"
-        else:
-            if args.pairs:
-                if args.filter:
-                    name = "{0}_Indiscriminant_Recombination".format(label)
-                else:
-                    name = "Indsicriminant_Recombination"
-            else:
-                if args.filter:
-                    name = "{0}_Discriminant_Recombination".format(label)
-                else:
-                    name = "Discriminant_Recombination"
-            color = args.nohighway
-            legend_shapes = "1"
-            legend_labels = "Recombination"
-
-        with open("{0}/{1}_hero_itol.txt".format(args.output, name), "w") as itol:
-            # Set mandatory information
-            itol.write("DATASET_CONNECTION\n\nSEPARATOR COMMA\n\nDATASET_LABEL,{0}\n\nCOLOR,#ff0ff0\n\n".format(name))
-
-            # Set Legend information
-            itol.write("LEGEND_TITLE,{0}\n".format(name))
-            itol.write("LEGEND_SHAPES,{0}\n".format(legend_shapes))
-            itol.write("LEGEND_COLORS,{0}\n".format(color))
-            itol.write("LEGEND_LABELS,{0}\n\n".format(legend_labels))
-
-            # Set arrow information
-            if args.pairs:
-                itol.write("DRAW_ARROWS,0\n")
-            else:
-                itol.write("DRAW_ARROWS,1\n")
-            itol.write("ARROW_SIZE,60\nMAXIMUM_LINE_WIDTH,5\nCURVE_ANGLE,0\nCENTER_CURVES,1\nALIGN_TO_LABELS,0\n\n")
-
-            # Set Data for branches
-            itol.write("DATA\n")
-            for pair in file:
-                itol.write("{0},{1},15,{2},normal\n".format(file[pair][0], file[pair][1], file[pair][3]))
-
-
-def gene_out(gene_file, recomb_genes):
-    # Write out file showing recombination frequency of genes
-    print("Writing out gene recombination file...", flush=True)
-    genes = []
-    for gene in recomb_genes:
-        genes.append((gene, recomb_genes[gene]))
-
-    sorted(genes, key=itemgetter(1)) # Sort on count of events
-
-    with open("{0}/{1}".format(args.output, gene_file), "w") as output:
-        output.write("gene\tfrequency\n")
-        for gene in genes:
-            output.write("{0}\t{1}\n".format(gene[0],gene[1]))
-
-
-def size_out(size_file, recomb_sizes):
-    # Write out recombination sizes
-    print("Writing out recombination size file...", flush=True)
-    with open("{0}/{1}".format(args.output, size_file), "w") as output:
-        for fragment in recomb_sizes:
-            output.write("{0}\n".format(fragment))
-
-
-def frequent_finder(recomb_dict, d_file, r_file):
-    # Sort Isolates by most frequent donor and recipient
-    donors = {}
-    recipients = {}
-
-    for pair in recomb_dict:
-        split_pair = pair.split(":")
-        d,r = split_pair[0], split_pair[1]
-
-        donors.setdefault(d, 0)
-        donors[d] += recomb_dict[pair]
-
-        recipients.setdefault(r, 0)
-        recipients[r] += recomb_dict[pair]
-
-    sorted_donors = sorted([(d,n) for d,n in donors.items()], key=itemgetter(1))
-    sorted_recipients = sorted([(r,n) for r,n in recipients.items()], key=itemgetter(1))
-
-    # Define frequent donors/recipients
-    d_count = [n[1] for n in sorted_donors]
-    r_count = [n[1] for n in sorted_recipients]
-
-    for collection in [d_count, r_count]:
-        if args.population > len(collection):
-            for x in range(args.population - len(collection)):
-                collection.append(0)
-
-    d_one_stdev_higher = (sum(d_count) / len(d_count)) + statistics.pstdev(d_count)
-    r_one_stdev_higher = (sum(r_count) / len(r_count)) + statistics.pstdev(r_count)
-
-    # Write out donor/recipient frequencies
-    with open("{0}/{1}".format(args.output, d_file), "w") as output:
-        output.write("Donor\tCount\t*** means significant\n")
-        for donor in reversed(sorted_donors):
-            if donor[1] >= d_one_stdev_higher:
-                output.write("{0}\t{1}***\n".format(donor[0], donor[1]))
-            else:
-                output.write("{0}\t{1}\n".format(donor[0], donor[1]))
-
-    with open("{0}/{1}".format(args.output, r_file), "w") as output:
-        output.write("Recipient\tCount\t*** means significant\n")
-        for recipient in reversed(sorted_recipients):
-            if recipient[1] >= r_one_stdev_higher:
-                output.write("{0}\t{1}***\n".format(recipient[0], recipient[1]))
-            else:
-                output.write("{0}\t{1}\n".format(recipient[0], recipient[1]))
-
-
-    # Load donors and recipients into dictionaries for bar graphs    
-    df_donors = [n[0] for n in sorted_donors if n[1] != 0]
-    df_recipients = [n[0] for n in sorted_recipients if n[1] != 0]
-
-    d_data = {"Donors": df_donors, "Events": [n for n in d_count if n != 0]}
-    data_frame = pandas.DataFrame(d_data)
-    r_data = {"Recipients": df_recipients, "Events": [n for n in r_count if n != 0]}
-    rata_frame = pandas.DataFrame(r_data)
-
-    # Build Bar Graphs
-    d_bar = (ggplot(data_frame, aes(x="Donors")) + 
-    geom_bar(aes(weight = "Events")) + 
-    labs(title = "Donation Events", x = "Donor", y = "# of Donations") + 
-    theme(axis_text_x = element_text(angle = 45, hjust = 1, size = 3)))
-    d_bar.save(filename="{0}/donations.{1}".format(args.output, args.format), format=args.format)
-
-    r_bar = (ggplot(rata_frame, aes(x="Recipients")) + 
-    geom_bar(aes(weight = "Events")) + 
-    labs(title = "Recipient Events", x = "Recipient", y = "# of Receipts") + 
-    theme(axis_text_x = element_text(angle = 45, hjust = 1, size = 3)))
-    r_bar.save(filename="{0}/recipients.{1}".format(args.output, args.format), format=args.format)   
-
-    return (sorted_donors, sorted_recipients)
-
-
-def base_pair_plot(recomb_proportions):
-    # Build bar graph of recombined base pairs per recipient
-    data = {"x": list(recomb_proportions.keys()), "y": list(recomb_proportions.values())}
-    data_frame = pandas.DataFrame(data)
-    graph = ggplot(data_frame, aes(x="x"))
-    graph += geom_bar(aes(weight = "y"))
-    graph += labs(title = "Total Recombination", x = "Genome", y = "# of Recombined Base Pairs")
-    graph += theme(axis_text_x = element_text(angle = 45, hjust = 1, size = 3))
-    graph.save(filename="{0}/recombined_portions.{1}".format(args.output, args.format), format=args.format)
-
-
-def box_and_whisker(filtered_stats):
-    # Make box and whisker plots for donation and reciept separated by filter groups
-    bw_data_donor = {"Donation": [], "Group": []}
-    bw_data_recipient = {"Receipt": [], "Group": []}
-    for group in filtered_stats:
-        if args.inter and group == "inter/inter":
-            continue
-
-        for idx,collection in enumerate(filtered_stats[group]):
-            target = bw_data_donor if idx == 0 else bw_data_recipient
-            keyword = "Donation" if idx == 0 else "Receipt"
-            for strain in collection:
-                target[keyword].append(strain[1])
-                target["Group"].append(group.split("/")[0])
-
-    donor_data_frame = pandas.DataFrame(bw_data_donor)
-    recipient_data_frame = pandas.DataFrame(bw_data_recipient)
-
-    d_bw = (ggplot(donor_data_frame, aes(x="Group", y="Donation", color = "Group")) +
-    geom_boxplot())
-    d_bw.save(filename="{0}/donor_box_and_whisker.{1}".format(args.output, args.format), format=args.format)    
-
-    r_bw = (ggplot(recipient_data_frame, aes(x="Group", y="Receipt", color = "Group")) +
-    geom_boxplot())
-    r_bw.save(filename="{0}/recipient_box_and_whisker.{1}".format(args.output, args.format), format=args.format)    
-    
-
-####### Main script #######
-print("Finding Donors for all recombination events...", flush=True)
-
-class PsuedoDirEntry:
-    # Allows multithreading of os.scandir
-    def __init__(self, name, path, is_dir):
-        self.name = name
-        self.path = os.path.abspath(path)
-        self.is_dir = is_dir
-
-# Make a directory for the output files
-args.output = make_directory(args.output)
-os.mkdir("{0}/filtered_recombination_events_{1}bp_{2}logBF".format(args.output, args.length, args.log))
-os.mkdir("{0}/blast_files".format(args.output))
-
-# Iterate over every gene and add to global recombination dictionary *Multi-threaded section*
-gene_dicts = [] # Each item in list is dictionary. Key - Recombination Pair. Value - Tuple of data (# of recomb events, length of event, gene recombined in)
-for i in os.scandir(args.fastgear):
-    gene_dicts.append(PsuedoDirEntry(i.name, i.path, i.is_dir()))
-
-# Multithreading run through each gene to find recombination pairs
+            colors[k].append(temp[k])
+    # Format final colors
+    final_colors = []
+    for i in range(num_colors):
+        final_colors.append( '{0},{1},{2}'.format(colors['r'][i], colors['g'][i], colors['b'][i]))
+
+    return final_colors
+
+
+#################
+## Main Script ##
+#################
+
+# Get args and set some as global
+args = get_args()
+global length
+global bayes
+length = args.length
+bayes = args.bayes
+
+# Make new directory
+try:
+    os.mkdir(args.outdir)
+except FileExistsError:
+    dir_ext = str(time.time()).split('.')[0]
+    new_dir = args.outdir+'_'+dir_ext
+    args.outdir = new_dir
+    os.mkdir(args.outdir)
+    print('Directory already exists. Output directory will be {0}'.format(args.outdir), flush=True)
+
+# Parse metadata from groups file
+metadata = parse_metadata(args.groups)
+print('Made it past metadata parsing!', flush = True)
+
+## DEBUG MODE FOR FASTGEAR PARSING
+#recombination_events = []
+#for gene in args.fastgears:
+#    print('Started {0}'.format(gene), flush=True)
+#    recombination_events.append(parse_fastgear(gene))
+#    print('Finished {0}'.format(gene), flush=True)
+
+# Parse fastGEAR data from each run
+genes = parse_table(args.hero_table)
 pool = multiprocessing.Pool(processes=args.cpus)
-gene_recombs = pool.map(lineage_fastas, gene_dicts)
+recombination_events = pool.map(unpack_arguments, genes) 
 pool.close()
 pool.join()
+print('Parsed all the genes!', flush = True)
 
-filtered_stats = {} # Donation/receipt data for each filtering group
-external = [] # External recombination master list
-bad_genes = [] # All failed genes
-good_genes = []  # All good genes
+# Filter good events out of all the data
+events, genes = parse_events(recombination_events)
+print('Got all the events!', flush=True)
 
-# Sort recombination events from failed genes.
-for gene in gene_recombs:
-    if isinstance(gene, list):
-        good_genes += gene[0]
-        external += gene[1]
-    else:
-        bad_genes.append(gene)
+# Plot results as circos plot
+make_circos(events, args.outdir)
+subprocess.run('circos --conf {0}/circos.conf -outputdir {0}'.format(args.outdir), shell=True)
 
-unique_recombination, paired_recombination, recombination_fragments, ancestral_events  = find_pairs(good_genes)
-
-write_out_events(unique_recombination)
-
-# Filter if chosen, use paired results if chosen, and write output
-if args.filter:
-    # Get strain groups
-    strain_filters = get_filter_groups()
-
-    # Paired keys will always be correct regardless of user choice based on find_pairs logic
-    filtered_recombination = filter_recombination(paired_recombination, strain_filters)
-
-    for group in filtered_recombination:
-        os.mkdir("{0}/{1}".format(args.output, group))
-        write_out("{0}/{0}".format(group), filtered_recombination[group])
-
-elif args.pairs:
-    write_out('inter', paired_recombination)
-
-else:
-    write_out('inter', unique_recombination)
-
-# Write out External recombination fragments
-Bio.SeqIO.write(external, "{0}/external_recomb_fragments.fa".format(args.output), "fasta")
-
-# Recomb_proportions plot
-base_pair_plot(recombination_fragments)
-
-# Make box-whisker plots of donors and recipients
-if args.filter and not args.pairs:
-    box_and_whisker(filtered_stats)
-
-# Write out final files
-with open("{0}/failed_genes.txt".format(args.output), "w") as bad: # Write out any failed genes for further evaluation
-    for gene in bad_genes:
-        bad.write("{0}\n".format(gene))
-
-with open("{0}/recombined_base_pairs.txt".format(args.output), "w") as output: # Write out base pair total for recombination in each genome
-    output.write("Genome\tBase Pairs\n")
-    for genome in recombination_fragments:
-        output.write("{0}\t{1}\n".format(genome, recombination_fragments[genome]))
-
-if args.cleanup:
-    shutil.rmtree("{0}/blast_files".format(args.output))
-
-# Write out runtime
-print("{0} Ancestral Events filtered out".format(ancestral_events), flush = True)
-print("Finished in {0}".format(time.time() - t0), flush=True)
+# Find highways
+unique_groups = set(product(Metagroup.metagroup_dict.keys(),repeat=2))
+recomb_by_pair, highway_value = calculate_highway(events, unique_groups)
+make_highway_circos(highway_value, args.outdir)
+subprocess.run('circos --conf {0}/highway_circos.conf -outputdir {0} -outputfile highway_circos'.format(args.outdir), shell=True)
 
 
+## Write some stats files ##
+# Write out raw recombination event data
+with open('{0}/recombination_events.txt'.format(args.outdir), 'w') as outfile:
+    outfile.write('Donor_Group\tRecip_Group\tFrag_Length\tGene\tRecipient_strains\n')
+    for event in events:
+        event = [str(x) for x in event]
+        outfile.write('\t'.join(event) + '\n')
+
+# Write recombinations per pair
+with open('{0}/recombination_pairs.txt'.format(args.outdir), 'w') as outfile:
+    outfile.write('Donor_Group\tRecipient_Group\tCount\n')
+    for pair in recomb_by_pair:
+        outfile.write('{0}\t{1}\t{2}\n'.format(pair[0], pair[1], recomb_by_pair[pair]))
+
+# Write out summary statistics about recombination
+with open('{0}/summary_stats.txt'.format(args.outdir), 'w') as outfile:
+    outfile.write('Minimum recombinations for a highway: {0}\n'.format(highway_value))
+    highways = [x for x in recomb_by_pair.values() if x > highway_value]
+    outfile.write('Number of predicted events: {0}\n'.format(len(events)))
+    outfile.write('Number of events from highways: {0}\n'.format(sum(highways)))
+    outfile.write('Number of recombining pairs: {0}\n'.format(len(recomb_by_pair)))
+    outfile.write('Number of highway pairs: {0}\n'.format(len(highways)))
+    unique_genes = set()
+    for event in events:
+        unique_genes.add(event[3])
+    outfile.write('Number of genes with recombination: {0}\n'.format(len(unique_genes)))
+    
+print('Run time: ', time.time() - start_time, 'seconds')

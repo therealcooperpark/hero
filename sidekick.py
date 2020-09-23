@@ -1,79 +1,43 @@
 #! /usr/bin/env python3
+'''
+Convert Roary pan_genome_sequences FASTA headers into genome based headers
+Optional ability to run fastGEAR on each new alignment
+'''
 
 import argparse
-import Bio.SeqIO
-import math
+import multiprocessing
 import os
 import random
 import shutil
 import string
 import subprocess
-
-# Arguments
-parser = argparse.ArgumentParser(description = "Use before HERO to extract individual alignment files for each core gene in pan-genome. Will also run fastGEAR individually on genes.", usage = "sidekick.py [options] gffs")
-parser.add_argument("gffs", help = "Filepath to GFF files")
-parser.add_argument("--core", action = 'store_false', help = "Compile all core genes found in --cluster_file [True]")
-parser.add_argument("--accessory", action = 'store_true', help = "Compile all accessory genes found in --cluster_file present in at least 2 isolates, but fewer than 'core_definition' [False]")
-parser.add_argument("--core_definition", metavar = '', default = "0.99", type = float, help = "Fraction of genomes that a gene must be found in to be 'core' [0.99]")
-parser.add_argument("--alignments", metavar = '', default = "./pan_genome_sequences", help = "Filepath to individual gene alignments, [./pan_genome_sequences]")
-parser.add_argument("--cluster_file", metavar = '', default = "./clustered_proteins", help = "Filepath to the 'clustered_proteins' output of Roary [./clustered_proteins]")
-parser.add_argument("--fastGEAR", action = 'store_true', help = "Run fastGEAR on every gene collected by sidekick [False]")
-parser.add_argument("--output", metavar = '', default = ".", help = "Filepath to output directory for renamed genome protein files. [./]")
-args = parser.parse_args()
+import sys
+import time
 
 
-def pan_genome_extraction(cluster_file, genome_num):
-    #### Find Core genes among clustered_proteins genes
-
-    core_cluster = []
-    accessory_cluster = []
-
-    with open(args.cluster_file, "r") as cluster:
-        for line in cluster:
-            line = line.split(":")
-        
-            # Name of protein cluster
-            group = line[0]
-            if "/" in group:
-                group = "_".join(group.split("/"))
-
-            # Count number of occurances
-            prots = line[1].split("\t")
-            if args.core and len(prots) > math.floor(genome_num * args.core_definition):
-                core_cluster.append(group)
-            elif args.accessory and len(prots) > 1 and len(prots) <= math.floor(genome_num * 0.99):
-                accessory_cluster.append(group)
-
-    if args.accessory:
-        print("{0} Groups found in Accessory Genome".format(len(accessory_cluster)), flush = True)
-    print("{0} Groups found in core genome".format(len(core_cluster)), flush = True)
-
-
-    return (core_cluster, accessory_cluster)
-
-
-def file_finder(core_cluster, alignments, output):
-    # Copy alignment files from pan_genome_sequences folder to new folder
-    for group in core_cluster:
-        try:
-            shutil.copy("{0}/{1}.fa.aln".format(alignments, group), output)
-        except FileNotFoundError:
-
-            # Split by the error causing character
-            if "-" in group:
-                group = group.split("-")
-            elif "'" in group:
-                group = group.split("'")
-            else:
-                group = group.split(" ")
-
-            # Join by an underscore to find file
-            group = ("_").join(group)
-            shutil.copy("{0}/{1}.fa.aln".format(alignments, group), output)
+def parse_args():
+    parser = argparse.ArgumentParser(description = 'Use before HERO to convert Roary FASTA alignment headers to genome names')
+    parser.add_argument('gff_table', help='Tab-delimited file of GFF file location and associated genome for renaming')
+    parser.add_argument('--alns', metavar='', default='./pan_genome_sequences', help='Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]')
+    parser.add_argument('--fastgear', action='store_true', help='Run fastGEAR on each gene alignment [False]')
+    parser.add_argument('--output', metavar='', default='sidekick_genes', help='Output directory name')
+    parser.add_argument('--cpus', metavar='', default=1, type=int, help='Number of cpus to use [1]')
+ 
+    fastgear_args = parser.add_argument_group('fastGEAR')
+    fastgear_args.add_argument('--fgout', default='fastgear_genes', help='Output directory name for fastgear runs')
+    fastgear_args.add_argument('--iters', default='15', help='Number of iterations [15]')
+    fastgear_args.add_argument('--bounds', default='10', help='Upper bound for number of clusters [10]')
+    fastgear_args.add_argument('--partition', default='-', help='File containing a partition for strains [NA]')
+    fastgear_args.add_argument('--fg_output', default='1', help='1=reduced output, 0=complete output')
+    return parser.parse_args()
 
 
 def make_directory(name):
-    # Make output directory for core genome alignments
+    '''
+    Make output directory.
+    If name already taken, make a random extension
+    '''
+
     try:
         os.mkdir(name)
         out = name
@@ -81,111 +45,158 @@ def make_directory(name):
         ext = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(6))
         out = name + '_' + ext
         os.mkdir(out)
-        print("Output directory already found, writing to {0}".format(out))
-    
+        print('Output directory already found, writing to {0} instead'.format(out))
     return out
 
-def gff_2_GeneID(gff):
-    # Read GFF file for Gene ID
-    with open("{0}/{1}".format(args.gffs, gff.name), "r") as file:
-        for line in file:
-            if "##" in line:
-                continue
-            if line.split()[2] == "CDS":
-                try:
-                    ID = line.split("=")[1].split("_")[0]
-                except IndexError:
-                    print(gff)
-                break
-    return ID
+
+def parse_gff_table(gff_table):
+    ''' 
+    Parse each GFF file for associated CDS Protein code
+    and assign code to the genome listed in user table
+    '''
+
+    cds_to_genome = {}
+
+    with open(gff_table, 'r') as infile:
+        for line in infile:
+            line = line.strip().split()
+            gff, genome = line[0], line[1]
+            # Try to open the GFF
+            try:
+                gff_file = open(gff, 'r')
+            except FileNotFoundError:
+                print('GFF file not found, check location: {0}'.format(gff))
+                sys.exit(1)
+
+            # Get CDS value from the GFF
+            # Assign CDS ID to dict with genome as key
+            for gff_line in gff_file:
+                if gff_line[0] == '#':
+                    continue
+
+                if gff_line.split()[2] == 'CDS':
+                    try:
+                        ID = gff_line.split('=')[1].split('_')[0]
+                    except IndexError:
+                        print('Naming error in {0}'.format(gff))
+                        sys.exit(1)
+                    cds_to_genome[ID] = genome
+                    gff_file.close()
+                    break
+    return cds_to_genome
 
 
-def alignment_parser(group, directory, gff_dict, final_out):
-    # Read Alignment file (fasta) and sort into dictionary
-    fasta_dict = {}
+def rename_alignment(alignment_path):
+    '''
+    Create a copy of the fasta file with headers renamed
+    using the cds_to_genome dictionary
+    '''
 
-    try:
-        file = open("{0}/{1}.fa.aln".format(directory, group))
-    except FileNotFoundError:
-            # Split by the error causing character
-            if "-" in group:
-                group = group.split("-")
-            elif "'" in group:
-                group = group.split("'")
+    new_aln_name = alignment_path.split('/')[-1][:-4]
+    with open(alignment_path, 'r') as old_aln:
+        with open('{0}/{1}'.format(output, new_aln_name), 'w') as new_aln:
+            for line in old_aln:
+
+                # If header, rename and write to new
+                if line[0] == '>':
+                    try:
+                        old_head = line.strip().split('_')[0][1:]
+                        new_head = cds_dict[old_head]
+                        new_aln.write('>{0}\n'.format(new_head))
+                    except KeyError:
+                        print('{0} has no genome equivalent in alignment {1}! Make sure all GFFs were provided'.format(old_head, alignment_path))
+                        os._exit(1)
+                # Else, just write the seq over
+                else:
+                    new_aln.write(line)
+
+
+def make_specs_file(iters, bounds, partition, fg_output):
+    '''
+    Make fastgear specs file
+    '''
+
+    with open('fG_input_specs.txt', 'w') as output:
+        output.write(iters + " # Number of iterations\n")
+        output.write(bounds + ' # Upper bound for the number of clusters (possibly multiple values)\n')
+        output.write('0 # Run clustering for all upper bounds (0=no/1=yes)\n')
+        output.write(partition + ' # File containing a partition for strains\n')
+        output.write(fg_output + ' # 1=produce reduced output, 0=produce complete output\n')
+    return './fG_input_specs.txt'
+
+
+def run_fastgear(sidekick_dir, fg_dir, spec_file, cpus):
+    '''
+    Run fastgear on each renamed gene alignment
+    '''
+
+    # Get list of filepaths to give to parallel
+    with open('renamed_gene_filepaths.txt', 'w') as infile:
+        for gene in os.scandir(sidekick_dir):
+            infile.write(gene.path + '\n')
+
+    # Assume ~ 4 cpus per job. Also, just don't submit all jobs at once!
+    j = cpus // 4
+
+    # Build string to run everything and then do it!
+    run_string = 'parallel -j {0} '.format(j)
+    run_string += '"fastGEAR ./{} ./' + fg_dir + '/{/.}/{/.} ' + spec_file + '"'
+    run_string += ' < renamed_gene_filepaths.txt'
+    print(run_string)
+    subprocess.run(run_string, shell=True)
+
+
+def make_hero_input(gene_output, fgout):
+    '''
+    Make the input file necessary for HERO to run
+    '''
+
+    with open('hero_input.txt', 'w') as outfile:
+        for gene in os.scandir(gene_output):
+            gene_name = gene.name.split('.')[0]
+            fg_path = fgout + '/' + gene_name + '/'
+            if os.path.isdir(fg_path):
+                outfile.write('{0}\t{1}\t{2}\n'.format(gene_name,
+                                                       gene.path,
+                                                       fg_path))
             else:
-                group = group.split(" ")
+                print('fastGEAR for gene {0} not found!'.format(gene.name))
 
-            # Join by an underscore to find file
-            group = ("_").join(group)
-            file = open("{0}/{1}.fa.aln".format(directory, group))
+def main():
+    # Get arguments from command line
+    args = parse_args()
 
-    for line in file:
-        if line[0] == ">":
-            ID = gff_dict[line.split("_")[0][1:]]
-            fasta_dict.setdefault(ID, "")
-        else:
-            fasta_dict[ID] += line.rstrip()
+    # Iterate over each gene alignment and build a renamed one
+    args.output = make_directory(args.output)
+    
+    # Get dictionary of CDS IDs to genomes
+    cds_to_genome = parse_gff_table(args.gff_table)
 
-    file.close()
+    # Set global variables for cpus
+    global output
+    output = args.output
+    global cds_dict
+    cds_dict = cds_to_genome
 
-    # Records list for Biopython write out
-    records = []
-    for i in fasta_dict.keys():
-        cur_record = Bio.SeqRecord.SeqRecord(id = i, description="", seq=Bio.Seq.Seq(fasta_dict[i]))
-        records.append(cur_record)
+    # Get list of alignments to rename
+    gene_alns = []
+    for gene in os.scandir(args.alns):
+        gene_alns.append(gene.path)
+    
+    # Iterate over each gene alignment and rename the headers
+    # BONUS: We can use multithreading!
+    print('Starting rename process!')
+    pool = multiprocessing.Pool(processes=args.cpus)
+    status = pool.map(rename_alignment, gene_alns)
+    pool.close()
+    pool.join()
 
-    # Write records to FASTA file
-    Bio.SeqIO.write(records, "{0}/{1}.fa".format(final_out, group), "fasta")
-
-
-def fastGEAR(final_out, directory):
-    ############# Run fastGEAR on each individual gene #################
-    print("Running fastGEAR on each renamed core gene alignment...")
-    for alignment in os.scandir(final_out):
-        # Make directory for gene and move to fastgear folder
-        gene_dir = alignment.name[:-3]
-        os.mkdir("{0}/{1}".format(directory, gene_dir))
-        shutil.copy(alignment.path, "{0}/{1}/.".format(directory, gene_dir))
-
-        # Run fastgear on core gene
-        os.chdir("{0}/{1}/".format(directory, gene_dir))
-        subprocess.run("fastGEAR ./{0} ./gene_fastgear /mnt/lustre/andam/shared/coopers_programs/fG_input_specs.txt".format(alignment.name), shell = True)
-        os.chdir("../../")
-        
-
-def main(which_portion, portion_list, gff_dict):
-    # Move core genes to new directory
-    if which_portion == 0:
-        label = "core"
-    else:
-        label = "accessory"
-#    out = make_directory("{0}/sidekick_{1}_genome_alns".format(args.output, label))
-#    file_finder(portion_list, args.alignments, out)
-
-    # Rename gene alignments based on Gene ID
-    print("Renaming ALN files based on protein IDs")
-    final_out = make_directory("{0}/renamed_{1}_aln_files".format(args.output, label))
-    for gene in portion_list:
-        alignment_parser(gene, args.alignments, gff_dict, final_out)
-
-
-    # <Optional> Run fastGEAR on genes
-    if args.fastGEAR:
-        directory = make_directory("{0}/{1}_gene_fastgears".format(args.output, label))
-        fastGEAR(final_out, directory)
-
-
-
-# Build pan-genome
-genome_num = 0
-gff_dict = {}
-for file in os.scandir(args.gffs):
-    gff_dict[gff_2_GeneID(file)] = file.name.split(".gff")[0]
-    genome_num += 1
-
-pan_genome = pan_genome_extraction(args.cluster_file, genome_num)
-
-for num, portion in enumerate(pan_genome):
-    if len(portion) > 0:
-        main(num, portion, gff_dict)
-
+    # Make fastGEAR specs file and run fastGEAR on each gene
+    print('Starting batch fastGEARs!')
+    if args.fastgear:
+        args.fgout = make_directory(args.fgout)
+        spec_file = make_specs_file(args.iters, args.bounds, args.partition, args.fg_output)
+        run_fastgear(output, args.fgout, spec_file, args.cpus)
+        make_hero_input(output, args.fgout)
+if __name__ == '__main__':
+    main()
