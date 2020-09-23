@@ -1,6 +1,9 @@
 #! /usr/bin/env python3
-''' Early HERO draft - Testing the values that return from a fastGEAR run
-    given the parameters for "good" recombination '''
+''' 
+HERO - Highways Enumerated by Recombination Observations
+Author - Cooper Park
+'''
+
 
 from argparse import ArgumentParser
 from Bio.SeqIO import parse as BioParse
@@ -12,9 +15,6 @@ import pandas
 from random import randint
 import subprocess
 import time
-
-## Custom modules
-#from circos_hero import *
 
 start_time = time.time()
 

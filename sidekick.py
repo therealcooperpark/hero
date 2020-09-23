@@ -16,12 +16,13 @@ import time
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description = 'Use before HERO to convert Roary FASTA alignment headers to genome names')
+    parser = argparse.ArgumentParser(description = 'Use before HERO to convert Roary FASTA alignment headers to genome names',
+                                     usage='sidekick.py [options] gff_table')
     parser.add_argument('gff_table', help='Tab-delimited file of GFF file location and associated genome for renaming')
-    parser.add_argument('--alns', metavar='', default='./pan_genome_sequences', help='Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]')
+    parser.add_argument('--alns', default='./pan_genome_sequences', help='Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]')
     parser.add_argument('--fastgear', action='store_true', help='Run fastGEAR on each gene alignment [False]')
-    parser.add_argument('--output', metavar='', default='sidekick_genes', help='Output directory name')
-    parser.add_argument('--cpus', metavar='', default=1, type=int, help='Number of cpus to use [1]')
+    parser.add_argument('--output', default='sidekick_genes', help='Output directory name')
+    parser.add_argument('--cpus', default=1, type=int, help='Number of cpus to use [1]')
  
     fastgear_args = parser.add_argument_group('fastGEAR')
     fastgear_args.add_argument('--fgout', default='fastgear_genes', help='Output directory name for fastgear runs')
