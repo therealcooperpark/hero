@@ -56,19 +56,18 @@ usage: sidekick.py [options] gff_table
 Use before HERO to convert Roary FASTA alignment headers to genome names
 
 positional arguments:
-  gff_table             Tab-delimited file of GFF file location and associated
-                        genome for renaming
+  gff_table              Tab-delimited file of GFF file location and associated genome for renaming
 
 optional arguments:
   -h, --help             show this help message and exit
-  --alns ALNS            Filepath to Roary pan_genome_sequences directory
-                         (requires -z argument) [./pan_genome_sequences]
-  --fastgear             Run fastGEAR on each gene alignment [False]
-  --output OUTPUT        Output directory name
-  --cpus CPUS            Number of cpus to use [1]
+  --alns ALNS            Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]
+  --output OUTPUT        Output directory name [sidekick_genes]
+  --cpus CPUS            Number of CPUS to use [1]
 
 fastGEAR:
-  --fgout FGOUT          Output directory name for fastgear runs
+  --fastgear FASTGEAR    Filepath to "run_fastGEAR.sh" script provided by fastGEAR. Must be used with --mcr
+  --mcr MCR              Filepath to MCR executable. Must be used if using --fastgear
+  --fgout FGOUT          Output directory name for fastgear runs [fastgear_genes]
   --iters ITERS          Number of iterations [15]
   --bounds BOUNDS        Upper bound for number of clusters [10]
   --partition PARTITION  File containing a partition for strains [NA]
