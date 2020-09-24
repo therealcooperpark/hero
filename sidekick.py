@@ -20,12 +20,13 @@ def parse_args():
                                      usage='sidekick.py [options] gff_table')
     parser.add_argument('gff_table', help='Tab-delimited file of GFF file location and associated genome for renaming')
     parser.add_argument('--alns', default='./pan_genome_sequences', help='Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]')
-    parser.add_argument('--fastgear', action='store_true', help='Run fastGEAR on each gene alignment [False]')
-    parser.add_argument('--output', default='sidekick_genes', help='Output directory name')
-    parser.add_argument('--cpus', default=1, type=int, help='Number of cpus to use [1]')
+    parser.add_argument('--output', default='sidekick_genes', help='Output directory name [sidekick_genes]')
+    parser.add_argument('--cpus', default=1, help='Number of CPUS to use [1]')
  
     fastgear_args = parser.add_argument_group('fastGEAR')
-    fastgear_args.add_argument('--fgout', default='fastgear_genes', help='Output directory name for fastgear runs')
+    fastgear_args.add_argument('--fastgear', help='Filepath to "run_fastGEAR.sh" script provided by fastGEAR. Must be used with --mcr')
+    fastgear_args.add_argument('--mcr', help='Filepath to MCR executable. Must be used if using --fastgear')
+    fastgear_args.add_argument('--fgout', default='fastgear_genes', help='Output directory name for fastgear runs [fastgear_genes]')
     fastgear_args.add_argument('--iters', default='15', help='Number of iterations [15]')
     fastgear_args.add_argument('--bounds', default='10', help='Upper bound for number of clusters [10]')
     fastgear_args.add_argument('--partition', default='-', help='File containing a partition for strains [NA]')
@@ -126,7 +127,7 @@ def make_specs_file(iters, bounds, partition, fg_output):
     return './fG_input_specs.txt'
 
 
-def run_fastgear(sidekick_dir, fg_dir, spec_file, cpus):
+def run_fastgear(fg_path, mcr_path, sidekick_dir, fg_dir, spec_file, cpus):
     '''
     Run fastgear on each renamed gene alignment
     '''
@@ -137,11 +138,12 @@ def run_fastgear(sidekick_dir, fg_dir, spec_file, cpus):
             infile.write(gene.path + '\n')
 
     # Assume ~ 4 cpus per job. Also, just don't submit all jobs at once!
-    j = cpus // 4
+    j = cpus // 4 if cpus > 8 else 1
 
     # Build string to run everything and then do it!
     run_string = 'parallel -j {0} '.format(j)
-    run_string += '"fastGEAR ./{} ./' + fg_dir + '/{/.}/{/.} ' + spec_file + '"'
+    run_string += '"{0} {1}'.format(fg_path, mcr_path)
+    run_string += ' ./{} ./' + fg_dir + '/{/.}{/.} ' + spec_file + '"'
     run_string += ' < renamed_gene_filepaths.txt'
     print(run_string)
     subprocess.run(run_string, shell=True)
@@ -166,6 +168,22 @@ def make_hero_input(gene_output, fgout):
 def main():
     # Get arguments from command line
     args = parse_args()
+
+    if args.fastgear:
+        # Verify that filepath to fastgear exists
+        if not os.path.exists(args.fastgear):
+            print('Invalid filepath to run_fastgear.sh', flush = True)
+            sys.exit(1)
+
+        # Verify that MCR executable given
+        if not args.mcr:
+            print('MCR executable filepath required to run fastgear.', flush = True)
+            sys.exit(1)
+
+        # Verify that MCR executable path exists
+        if not os.path.exists(args.mcr):
+            print('Invalid filepath to MCR executable', flush = True)
+            sys.exit(1)
 
     # Iterate over each gene alignment and build a renamed one
     args.output = make_directory(args.output)
@@ -197,7 +215,7 @@ def main():
     if args.fastgear:
         args.fgout = make_directory(args.fgout)
         spec_file = make_specs_file(args.iters, args.bounds, args.partition, args.fg_output)
-        run_fastgear(output, args.fgout, spec_file, args.cpus)
+        run_fastgear(args.fastgear, args.mcr, output, args.fgout, spec_file, args.cpus)
         make_hero_input(output, args.fgout)
 if __name__ == '__main__':
     main()
