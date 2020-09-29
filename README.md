@@ -20,7 +20,7 @@ Because fastGEAR is most effective at predicting recombination on a gene-by-gene
 3) Prepare the primary input file necessary for HERO to process the new fastGEAR data.
 
 
-## INSTALLATION (TESTED ON UBUNTU 20.04.1, should work on all Linux Distributions)
+## INSTALLATION (TESTED ON UBUNTU 20.04.1, should work on most Linux Distributions)
 HERO (and Sidekick) has the following dependencies:
 - Python3.6
     - [BioPython](https://github.com/biopython/biopython)
