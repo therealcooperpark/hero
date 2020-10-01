@@ -27,6 +27,7 @@ HERO (and Sidekick) has the following dependencies:
     - [Pandas](https://pandas.pydata.org/docs/getting_started/install.html)
 - [fastGEAR](https://pubmed.ncbi.nlm.nih.gov/28199698/)
 - [Circos](http://circos.ca/)
+- [GNU Parallel](https://www.gnu.org/software/parallel/)
 
 ### Download command:
 `git clone https://github.com/therealcooperpark/hero.git`
