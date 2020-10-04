@@ -25,6 +25,7 @@ HERO (and Sidekick) has the following dependencies:
 - Python3.6
     - [BioPython](https://github.com/biopython/biopython)
     - [Pandas](https://pandas.pydata.org/docs/getting_started/install.html)
+    - [Plotnine](https://plotnine.readthedocs.io/en/stable/)
 - [fastGEAR](https://pubmed.ncbi.nlm.nih.gov/28199698/)
 - [Circos](http://circos.ca/)
 - [GNU Parallel](https://www.gnu.org/software/parallel/)
