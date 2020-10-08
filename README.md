@@ -35,6 +35,10 @@ HERO (and Sidekick) has the following dependencies:
 
 ## USAGE
 
+### Tutorial
+Explore a real-world walkthrough of a typical workflow to use HERO including pre-made output files each step of the way:
+[https://github.com/therealcooperpark/hero_example](https://github.com/therealcooperpark/hero_example)
+
 ### hero.py
 
 ```
