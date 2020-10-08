@@ -56,6 +56,14 @@ optional arguments:
   -b BAYES, --bayes BAYES     Minimum bayes factor required to process recomb event [10]
 ```
 
+The format for the `--hero_table` file is:
+
+```
+gene1 alignment_filepath  fastgear_filepath
+gene2 alignment_filepath2 fastgear_filepath2
+...
+```
+for every gene that you want to measure recombination from. This file will automatically be created as one output from `sidekick.py`.
 ### sidekick.py
 ```
 usage: sidekick.py [options] gff_table
@@ -81,28 +89,36 @@ fastGEAR:
   --fg_output FG_OUTPUT  1=reduced output, 0=complete output
 ```
 
+The format for the `gff_table` file is:
+```
+genome1_gff_filepath  genome_name1
+genome2_gff_filepath  genome_name2
+...
+```
+for every genome in the original Roary pan-genome.
+
 ## OUTPUT
-- summary_stats.txt
+`summary_stats.txt`
 
 Basic information about amount of recombination detected.
 
-- recombination_events.txt
+`recombination_events.txt`
 
 Tab-delimited table of each recombination event including donor group, recipient group, recombined fragment length (bp), gene name, and a list of recipient genomes with evidence for the event.
 
-- recombination_pairs.txt
+`recombination_pairs.txt`
 
 Tab-delmited table of all unique metadata group pairs and the number of recombination events between them.
 
-- circos.png/svg
+`circos.png/svg`
 
 PNG and SVG formatted circos networks visualizing the network of recombination measured by HERO. See below for details on interpretting the figure.
 
-- highway_circos.png/svg
+`highway_circos.png/svg`
 
 PNG and SVG formatted circos networks highlighting highways of recombination detected by HERO.
 
-- circos.conf/circos_karyotype.txt/circos_links.txt/highway_circos.conf
+`circos.conf/circos_karyotype.txt/circos_links.txt/highway_circos.conf`
 
 Configuration files created by HERO to create the circos plots.
 
