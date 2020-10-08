@@ -11,7 +11,8 @@ from itertools import product
 import math
 import multiprocessing
 import os
-import pandas
+import pandas as pd
+from plotnine import *
 from random import randint
 import subprocess
 import time
@@ -39,7 +40,7 @@ def parse_metadata(metadata_file):
         with open(metadata_file, 'r') as metafile:
             for line in metafile:
                 line = line.strip().split()
-                groups[line[0]] = line[1]
+                groups[line[0]] = line[1].lower()
     except FileNotFoundError:
         print('Groups file {0} could not be opened. Ensure filepath is correct'.format(metadata_file))
         exit(1)
@@ -309,7 +310,7 @@ def calculate_highway(events, unique_groups):
 
     # Calculate IQRs
     recomb_counts = list(recomb_events.values())
-    recomb_df = pandas.DataFrame({'Events': recomb_counts})
+    recomb_df = pd.DataFrame({'Events': recomb_counts})
     q3 = recomb_df.quantile(q=0.75)['Events']
     q1 = recomb_df.quantile(q=0.25)['Events']
     IQR = q3 - q1
@@ -378,7 +379,7 @@ def make_circos(events, outdir):
         # Write color and group to karyotype file
         for idx, group in enumerate(Metagroup.metagroup_dict.values()):
             color = rand_colors[idx]
-            k_file.write('chr - {0} {0} 0 {1} {0}\n'.format(group.name, group.total_events()))
+            k_file.write('chr - {0} {0} 0 {1} {0}\n'.format(group.name.lower(), group.total_events()))
 
     # Write link file
     with open('{0}/circos_links.txt'.format(outdir), 'w') as l_file:
@@ -532,6 +533,87 @@ def random_colors(num_colors):
     return final_colors
 
 
+def write_individual_stats(outdir, events):
+    '''
+    Write useful text files and plots for individual genome recomb data
+    1) Histogram of recombination fragment sizes
+    2) Histogram of recombination per gene
+    3) Histogram of recombination per recipient
+    '''
+
+    # Step 1: Write out fragment data and collect gene/recipient data
+    fragments  = open('{0}/fragment_sizes.txt'.format(outdir), 'w')
+    recipient_counts = {}
+    gene_counts      = {}
+    fragments.write('Size\n')
+    for event in events:
+        # Write out fragment now
+        fragments.write(str(event[2])+'\n')
+
+        # Add 1 to the count for the gene
+        gene_counts.setdefault(event[3], 0)
+        gene_counts[event[3]] += 1
+
+        # Each genome gets 1 to its recipient count
+        for genome in event[4].split(','):
+            recipient_counts.setdefault(genome, 0)
+            recipient_counts[genome] += 1
+    fragments.close()
+
+    # Write out recipient/gene data
+    genes      = open('{0}/gene_counts.txt'.format(outdir), 'w')
+    genes.write('Gene\tEvents\n')
+    for gene, count in gene_counts.items():
+        genes.write('{0}\t{1}\n'.format(str(gene), str(count)))
+    genes.close()
+
+    recipients = open('{0}/recipient_counts.txt'.format(outdir), 'w')
+    recipients.write('Recipient\tEvents\n')
+    for r, count in recipient_counts.items():
+        recipients.write('{0}\t{1}\n'.format(str(r), str(count)))
+    recipients.close()    
+
+    # Step 2: Make each histogram
+    make_histogram('{0}/gene_counts.txt'.format(outdir), 'gene', '{0}/gene_counts'.format(outdir))
+    make_histogram('{0}/recipient_counts.txt'.format(outdir), 'recipient', '{0}/recipient_counts'.format(outdir))
+    make_histogram('{0}/fragment_sizes.txt'.format(outdir), 'fragment', '{0}/fragment_sizes'.format(outdir))
+
+
+def make_histogram(file_loc, plot_type, filename):
+    '''
+    Make a histogram given a file location and plot type
+    '''
+
+    # Load in each filetype properly
+    if plot_type == 'gene':
+        datas     = pd.read_csv(file_loc, header=0, sep='\t')
+        x_lab     = '# of events per gene'
+        histogram = (ggplot(datas, aes(x='Events')) 
+                    + geom_histogram() + xlab(x_lab))
+    elif plot_type == 'recipient':
+        datas     = pd.read_csv(file_loc, header=0, sep='\t')
+        x_lab     = '# of events per recipient'
+        histogram = (ggplot(datas, aes(x='Events'))
+                    + geom_histogram() + xlab(x_lab))
+    elif plot_type == 'fragment':
+        datas     = pd.read_csv(file_loc, header=0)
+        x_lab     = 'Recombination fragment size (bp)'
+        histogram = (ggplot(datas, aes(x='Size'))
+                    + geom_histogram() + xlab(x_lab))
+    else:
+        datas = pd.read.csv(file_loc, header=1, sep='\t')
+        x_lab = plot_type
+
+    # Make histogram
+    histogram += ylab('Frequency') 
+    histogram += theme(panel_background=element_blank(),
+                       axis_line=element_line(),
+                       axis_text=element_text(size=20),
+                       axis_title=element_text(size=25))
+    # Save histogram
+    histogram.save(filename=filename+'.svg')
+
+
 #################
 ## Main Script ##
 #################
@@ -613,5 +695,6 @@ with open('{0}/summary_stats.txt'.format(args.outdir), 'w') as outfile:
     for event in events:
         unique_genes.add(event[3])
     outfile.write('Number of genes with recombination: {0}\n'.format(len(unique_genes)))
-    
+
+write_individual_stats(args.outdir, events)
 print('Run time: ', time.time() - start_time, 'seconds')
