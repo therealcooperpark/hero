@@ -124,8 +124,6 @@ Configuration files created by HERO to create the circos plots.
 
 
 ## FUTURE IMPROVEMENTS
-- Prepare recombination stats on individual recipients (ETA: ~1 week)
-- Provide a repo dedicated to an example workflow involving HERO (ETA: ~1 week)
 - Provide a conda installation option (ETA: ~2 weeks)
 
 
