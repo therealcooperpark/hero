@@ -138,6 +138,7 @@ Configuration files created by HERO to create the circos plots.
 
 
 ## FUTURE IMPROVEMENTS
+- Update sidekick to not depend on GFF files, only Roary directory (ETA: ~2 weeks)
 - Provide a conda installation option (ETA: ~2 weeks)
 
 
