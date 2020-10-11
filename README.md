@@ -59,11 +59,13 @@ optional arguments:
 The format for the `--hero_table` file is:
 
 ```
-gene1 alignment_filepath  fastgear_filepath
-gene2 alignment_filepath2 fastgear_filepath2
+gene1 path/to/fasta  path/to/fastgear
+gene2 path/to/fasta2 path/to/fastgear2
 ...
 ```
-for every gene that you want to measure recombination from. This file will automatically be created as one output from `sidekick.py`.
+for every gene that you want to measure recombination from. `path/to/fasta` is the path to the single gene alignment file and `path/to/fastgear` is the path to a directory contianing the output from the fastgear run for that alignment file.
+
+This table will automatically be created as one output from `sidekick.py`.
 ### sidekick.py
 ```
 usage: sidekick.py [options] gff_table
