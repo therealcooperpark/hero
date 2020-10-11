@@ -211,7 +211,8 @@ def parse_recombination(fastgear_run, Genome, gene_name):
                 for recipient in event[2]:
                     recip_group = metadata[recipient]
                     recip_strains = [strain for strain in event[2] if metadata[strain] == recip_group]
-                    final_info = (donor_group, recip_group, end-start, gene_name, ','.join(recip_strains))
+                    #final_info = (donor_group, recip_group, end-start, gene_name, ','.join(recip_strains))
+                    final_info = (donor_group, recip_group, start+1, end, gene_name, ','.join(recip_strains))
                     events.add(final_info)
 
     return list(events)
@@ -548,14 +549,14 @@ def write_individual_stats(outdir, events):
     fragments.write('Size\n')
     for event in events:
         # Write out fragment now
-        fragments.write(str(event[2])+'\n')
+        fragments.write(str(event[3] - event[2])+'\n')
 
         # Add 1 to the count for the gene
-        gene_counts.setdefault(event[3], 0)
-        gene_counts[event[3]] += 1
+        gene_counts.setdefault(event[4], 0)
+        gene_counts[event[4]] += 1
 
         # Each genome gets 1 to its recipient count
-        for genome in event[4].split(','):
+        for genome in event[5].split(','):
             recipient_counts.setdefault(genome, 0)
             recipient_counts[genome] += 1
     fragments.close()
@@ -672,7 +673,7 @@ subprocess.run('circos --conf {0}/highway_circos.conf -outputdir {0} -outputfile
 ## Write some stats files ##
 # Write out raw recombination event data
 with open('{0}/recombination_events.txt'.format(args.outdir), 'w') as outfile:
-    outfile.write('Donor_Group\tRecip_Group\tFrag_Length\tGene\tRecipient_strains\n')
+    outfile.write('Donor_Group\tRecip_Group\tstart\tend\tGene\tRecipient_strains\n')
     for event in events:
         event = [str(x) for x in event]
         outfile.write('\t'.join(event) + '\n')
@@ -693,7 +694,7 @@ with open('{0}/summary_stats.txt'.format(args.outdir), 'w') as outfile:
     outfile.write('Number of highway pairs: {0}\n'.format(len(highways)))
     unique_genes = set()
     for event in events:
-        unique_genes.add(event[3])
+        unique_genes.add(event[4])
     outfile.write('Number of genes with recombination: {0}\n'.format(len(unique_genes)))
 
 write_individual_stats(args.outdir, events)
