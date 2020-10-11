@@ -106,11 +106,23 @@ Basic information about amount of recombination detected.
 
 `recombination_events.txt`
 
-Tab-delimited table of each recombination event including donor group, recipient group, recombined fragment length (bp), gene name, and a list of recipient genomes with evidence for the event.
+Tab-delimited table of each recombination event including donor group, recipient group, start/end position of event, gene name, and a list of recipient genomes with evidence for the event.
 
 `recombination_pairs.txt`
 
 Tab-delmited table of all unique metadata group pairs and the number of recombination events between them.
+
+`fragment_sizes.svg/txt`
+
+A histogram and table of the fragment size of each event.
+
+`gene_counts.svg/txt`
+
+A histogram and table of the number of recombination events per gene.
+
+`recipient_counts.svg/txt`
+
+A histogram and table of the number of recombination events per recipient genome.
 
 `circos.png/svg`
 
