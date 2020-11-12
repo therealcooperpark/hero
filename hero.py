@@ -27,7 +27,7 @@ def get_args():
     parser.add_argument('-o', '--outdir', default='hero_results', type=str, help='Output directory [hero_results]')
     parser.add_argument('-c', '--cpus', default=1, type=int, help='CPUs to use [1]')
     parser.add_argument('-l', '--length', default=0, type=int, help='Minimum length required to process recomb event [0]')
-    parser.add_argument('-b', '--bayes', default=10, type=float, help='Minimum bayes factor required to process recomb event [10]')
+    parser.add_argument('-b', '--bayes', default=1, type=float, help='Minimum bayes factor required to process recomb event [1]')
 
     return parser.parse_args()
 
