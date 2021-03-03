@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument('gff_table', help='Tab-delimited file of GFF file location and associated genome for renaming')
     parser.add_argument('--alns', default='./pan_genome_sequences', help='Filepath to Roary pan_genome_sequences directory (requires -z argument) [./pan_genome_sequences]')
     parser.add_argument('--output', default='sidekick_genes', help='Output directory name [sidekick_genes]')
-    parser.add_argument('--cpus', default=1, help='Number of CPUS to use [1]')
+    parser.add_argument('--cpus', default=1, type=int, help='Number of CPUS to use [1]')
  
     fastgear_args = parser.add_argument_group('fastGEAR')
     fastgear_args.add_argument('--fastgear', help='Filepath to "run_fastGEAR.sh" script provided by fastGEAR. Must be used with --mcr')
@@ -205,6 +205,7 @@ def main():
     # Iterate over each gene alignment and rename the headers
     # BONUS: We can use multithreading!
     print('Starting rename process!')
+    print(type(args.cpus))
     pool = multiprocessing.Pool(processes=args.cpus)
     status = pool.map(rename_alignment, gene_alns)
     pool.close()
