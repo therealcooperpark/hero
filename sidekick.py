@@ -143,7 +143,7 @@ def run_fastgear(fg_path, mcr_path, sidekick_dir, fg_dir, spec_file, cpus):
     # Build string to run everything and then do it!
     run_string = 'parallel -j {0} '.format(j)
     run_string += '"{0} {1}'.format(fg_path, mcr_path)
-    run_string += ' ./{} ./' + fg_dir + '/{/.}{/.} ' + spec_file + '"'
+    run_string += ' ./{} ./' + fg_dir + '/{/.}/{/.} ' + spec_file + '"'
     run_string += ' < renamed_gene_filepaths.txt'
     print(run_string)
     subprocess.run(run_string, shell=True)
