@@ -205,7 +205,6 @@ def main():
     # Iterate over each gene alignment and rename the headers
     # BONUS: We can use multithreading!
     print('Starting rename process!')
-    print(type(args.cpus))
     pool = multiprocessing.Pool(processes=args.cpus)
     status = pool.map(rename_alignment, gene_alns)
     pool.close()
