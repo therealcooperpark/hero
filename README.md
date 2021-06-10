@@ -1,3 +1,6 @@
+* TOC
+{:toc}
+
 # HERO
 **H**ighways **E**numerated by **R**ecombination **O**bservations
 
