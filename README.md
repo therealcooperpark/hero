@@ -137,11 +137,6 @@ PNG and SVG formatted circos networks highlighting highways of recombination det
 Configuration files created by HERO to create the circos plots.
 
 
-## FUTURE IMPROVEMENTS
-- Update sidekick to not depend on GFF files, only Roary directory (ETA: ~2 weeks)
-- Provide a conda installation option (ETA: ~2 weeks)
-
-
 ## QUESTIONS
 Please submit suggestions and bug reports to the [Issue Tracker](https://github.com/therealcooperpark/hero/issues)
 
